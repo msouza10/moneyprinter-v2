@@ -1,10 +1,16 @@
 import os
 import google.generativeai as genai
+import logging
 
-os.environ["GEMINI_API_KEY"] = "AIzaSyD-fwsx8o7mGgZa5BYIt9uKOAPIXCA47qU"
+logging.basicConfig(level=logging.INFO)
 
-# Configurar a API key do Google Generative AI
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+def configure_api():
+    try:
+        os.environ["GEMINI_API_KEY"] = "AIzaSyD-fwsx8o7mGgZa5BYIt9uKOAPIXCA47qU"
+        genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+        logging.info("API do Google Generative AI configurada com sucesso.")
+    except Exception as e:
+        logging.error(f"Erro ao configurar a API do Google Generative AI: {e}")
 
 # Configurações de geração de texto
 generation_config = {
@@ -51,23 +57,27 @@ system_instruction = (
     "Informações Adicionais: Liste todas as informações que não existem no artigo que poderiam ser transmitidas."
 )
 
-# Criação do modelo generativo
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-pro",
-    safety_settings=safety_settings,
-    generation_config=generation_config,
-    system_instruction=system_instruction,
-)
-
 def generate_script(article):
-    chat_session = model.start_chat(
-        history=[
-            {
-                "role": "user",
-                "parts": [article]
-            }
-        ]
-    )
+    configure_api()
+    try:
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-pro",
+            safety_settings=safety_settings,
+            generation_config=generation_config,
+            system_instruction=system_instruction,
+        )
+        chat_session = model.start_chat(
+            history=[
+                {
+                    "role": "user",
+                    "parts": [article]
+                }
+            ]
+        )
+        response = chat_session.send_message(article)
+        logging.info("Script gerado com sucesso.")
+        return response.text
+    except Exception as e:
+        logging.error(f"Erro ao gerar o script: {e}")
+        return "Erro ao gerar o script."
 
-    response = chat_session.send_message(article)
-    return response.text

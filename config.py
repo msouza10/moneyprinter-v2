@@ -1,8 +1,12 @@
 from dotenv import load_dotenv
 import os
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 def load_env():
     load_dotenv()
+    logging.info("Variáveis de ambiente carregadas.")
 
 def get_env_variable(var_name, prompt):
     current_value = os.getenv(var_name)

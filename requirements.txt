@@ -1,0 +1,6 @@
+selenium
+webdriver_manager
+feedparser
+notion-client
+python-dotenv
+google-generativeai

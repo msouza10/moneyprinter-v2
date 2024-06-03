@@ -5,6 +5,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 import feedparser
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 def accept_cookies(driver):
     try:
@@ -13,12 +16,12 @@ def accept_cookies(driver):
         )
         cookie_button.click()
     except Exception as e:
-        print(f"Erro ao aceitar cookies: {e}")
+        logging.error(f"Erro ao aceitar cookies: {e}")
 
 def get_news_content(news_url):
     driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()))
     driver.get(news_url)
-    
+
     try:
         accept_cookies(driver)
         WebDriverWait(driver, 10).until(
@@ -27,17 +30,19 @@ def get_news_content(news_url):
         paragraphs = driver.find_elements(By.TAG_NAME, 'p')
         content = ' '.join([p.text for p in paragraphs])
         content = content.encode('ascii', 'ignore').decode('ascii')
+        logging.info(f"Conteúdo coletado da notícia: {news_url}")
     except Exception as e:
-        print(f"Erro ao coletar conteúdo da notícia: {e}")
+        logging.error(f"Erro ao coletar conteúdo da notícia: {e}")
         content = "N/A"
-    
-    driver.quit()
+    finally:
+        driver.quit()
+
     return content
 
-def fetch_hltv_news():
+def fetch_dust2_news():
     rss_url = "https://www.dust2.com.br/rss"
     feed = feedparser.parse(rss_url)
-    
+
     news_items = []
     for entry in feed.entries:
         news_item = {
@@ -49,16 +54,17 @@ def fetch_hltv_news():
             "media_content": entry.get('media_content', [{}])[0].get('url', None)
         }
         news_items.append(news_item)
-    
+
+    logging.info(f"{len(news_items)} notícias coletadas do Dust2.")
     return news_items
 
 def user_interaction(news_links):
     print("Links das notícias disponíveis:")
     for i, news in enumerate(news_links):
         print(f"{i + 1}. {news['title']} ({news['pubDate']}) - {news['link']}")
-    
+
     choice = input("Digite o número da notícia que você deseja coletar (ou 'all' para todas): ")
-    
+
     if choice.lower() == 'all':
         return news_links
     else:
@@ -66,5 +72,8 @@ def user_interaction(news_links):
         return [news_links[i] for i in selected_indices]
 
 def main():
-    news_list = fetch_hltv_news()
-    return news_list  # Apenas retornando a lista de notícias, sem chamar user_interaction diretamente
+    news_list = fetch_dust2_news()
+    return news_list
+
+if __name__ == "__main__":
+    main()

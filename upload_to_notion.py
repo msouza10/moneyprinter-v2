@@ -1,15 +1,28 @@
 from notion_client import Client
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 def split_text(text, max_length):
-    """Divide o texto em partes de no máximo max_length caracteres."""
-    return [text[i:i + max_length] for i in range(0, len(text), max_length)]
+    """Divide o texto em partes de no máximo max_length caracteres, sem quebrar palavras no meio."""
+    words = text.split()
+    parts = []
+    current_part = words.pop(0)
+    for word in words:
+        if len(current_part) + len(word) + 1 > max_length:
+            parts.append(current_part)
+            current_part = word
+        else:
+            current_part += ' ' + word
+    parts.append(current_part)
+    return parts
 
 def create_and_update_script(token, database_id, script):
     notion = Client(auth=token)
-    
+
     # Dividir o script em partes de 1500 caracteres
     script_parts = split_text(script, 1500)
-    
+
     # Extrair a primeira linha do script para o título
     title = "*" + script.split('\n')[0]
 
@@ -45,11 +58,11 @@ def create_and_update_script(token, database_id, script):
             ]
         )
         page_id = response['id']
-        print(f"Página do script '{title}' criada com sucesso: {response}")
+        logging.info(f"Página do script '{title}' criada com sucesso: {response}")
     except Exception as e:
-        print(f"Ocorreu um erro ao criar a página: {e}")
+        logging.error(f"Ocorreu um erro ao criar a página: {e}")
         return
-    
+
     # Atualizar a página com as partes restantes
     for part in script_parts[1:]:
         try:
@@ -72,6 +85,6 @@ def create_and_update_script(token, database_id, script):
                     }
                 ]
             )
-            print(f"Parte do script adicionada com sucesso: {response}")
+            logging.info(f"Parte do script adicionada com sucesso: {response}")
         except Exception as e:
-            print(f"Ocorreu um erro ao atualizar a página: {e}")
+            logging.error(f"Ocorreu um erro ao atualizar a página: {e}")
