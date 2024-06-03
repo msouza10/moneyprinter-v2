@@ -1,4 +1,4 @@
-from scraping_hltv import main as scrape_hltv_news, user_interaction, get_news_content
+from scraping_hltv import main as scrape_hltv_news, get_news_content, user_interaction
 from scraping_dust2 import main as scrape_dust2_news
 from script_generation import generate_script
 from upload_to_notion import create_and_update_script

@@ -52,6 +52,19 @@ def fetch_hltv_news():
     
     return news_items
 
+def user_interaction(news_links):
+    print("Links das notícias disponíveis:")
+    for i, news in enumerate(news_links):
+        print(f"{i + 1}. {news['title']} ({news['pubDate']}) - {news['link']}")
+    
+    choice = input("Digite o número da notícia que você deseja coletar (ou 'all' para todas): ")
+    
+    if choice.lower() == 'all':
+        return news_links
+    else:
+        selected_indices = [int(i) - 1 for i in choice.split()]
+        return [news_links[i] for i in selected_indices]
+
 def main():
     news_list = fetch_hltv_news()
-    return news_list  
+    return news_list
