@@ -1,5 +1,5 @@
 import unittest
-from database_helper import create_database, mark_news_as_sent, is_news_sent
+from scripts.database_helper import create_database, mark_news_as_sent, is_news_sent
 import sqlite3
 import os
 

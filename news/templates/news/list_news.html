@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Profit Portal - Listar notícias</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'styles.css' %}">
+</head>
+<body>
+    <header>
+        <img src="{% static 'images/logo.png' %}" alt="Logo" class="logo">
+        <h1>Profit Portal - Listar notícias</h1>
+    </header>
+    <main class="container">
+        <div class="card">
+            <form method="post" action="{% url 'process_news' %}">
+                {% csrf_token %}
+                <ul>
+                    {% for news in news %}
+                    <li>
+                        <input type="checkbox" name="selected_news" value="{{ news.guid }}" id="news_{{ news.guid }}">
+                        <label for="news_{{ news.guid }}"><strong>{{ news.title }}</strong> - {{ news.pubDate }}</label>
+                    </li>
+                    {% endfor %}
+                </ul>
+                <button type="submit">Processar Notícias</button>
+            </form>
+            <a href="{% url 'index' %}" class="button">Voltar para Home</a>
+        </div>
+    </main>
+    {% if messages %}
+    <footer>
+        <ul>
+            {% for message in messages %}
+            <li>{{ message }}</li>
+            {% endfor %}
+        </ul>
+    </footer>
+    {% endif %}
+</body>
+</html>

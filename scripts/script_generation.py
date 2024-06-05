@@ -1,10 +1,12 @@
 import os
 import google.generativeai as genai
 import logging
+from typing import Dict, Any
 
 logging.basicConfig(level=logging.INFO)
 
 def configure_api():
+    """Configura a API do Google Generative AI."""
     try:
         os.environ["GEMINI_API_KEY"] = "AIzaSyD-fwsx8o7mGgZa5BYIt9uKOAPIXCA47qU"
         genai.configure(api_key=os.environ["GEMINI_API_KEY"])
@@ -57,7 +59,8 @@ system_instruction = (
     "Informações Adicionais: Liste todas as informações que não existem no artigo que poderiam ser transmitidas."
 )
 
-def generate_script(article):
+def generate_script(article: str) -> str:
+    """Gera um script para vídeo a partir de um artigo."""
     configure_api()
     try:
         model = genai.GenerativeModel(
@@ -80,4 +83,3 @@ def generate_script(article):
     except Exception as e:
         logging.error(f"Erro ao gerar o script: {e}")
         return "Erro ao gerar o script."
-

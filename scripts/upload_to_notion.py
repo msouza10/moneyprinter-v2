@@ -4,17 +4,23 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 def split_text(text, max_length):
-    """Divide o texto em partes de no máximo max_length caracteres, sem quebrar palavras no meio."""
-    words = text.split()
+    """Divide o texto em partes de no máximo max_length caracteres, mantendo quebras de linha."""
+    paragraphs = text.split('\n')
     parts = []
-    current_part = words.pop(0)
-    for word in words:
-        if len(current_part) + len(word) + 1 > max_length:
+    current_part = ""
+
+    for paragraph in paragraphs:
+        if len(current_part) + len(paragraph) + 1 > max_length:
             parts.append(current_part)
-            current_part = word
+            current_part = paragraph
         else:
-            current_part += ' ' + word
-    parts.append(current_part)
+            if current_part:
+                current_part += '\n'
+            current_part += paragraph
+
+    if current_part:
+        parts.append(current_part)
+    
     return parts
 
 def create_and_update_script(token, database_id, script):
@@ -24,21 +30,23 @@ def create_and_update_script(token, database_id, script):
     script_parts = split_text(script, 1500)
 
     # Extrair a primeira linha do script para o título
-    title = "*" + script.split('\n')[0]
+    title = script.split('\n')[0] if script else "Sem Título"
 
     # Criar a página
     try:
         response = notion.pages.create(
             parent={"database_id": database_id},
             properties={
-                "title": [
-                    {
-                        "type": "text",
-                        "text": {
-                            "content": title
+                "title": {
+                    "title": [
+                        {
+                            "type": "text",
+                            "text": {
+                                "content": title
+                            }
                         }
-                    }
-                ]
+                    ]
+                }
             },
             children=[
                 {
@@ -88,3 +96,4 @@ def create_and_update_script(token, database_id, script):
             logging.info(f"Parte do script adicionada com sucesso: {response}")
         except Exception as e:
             logging.error(f"Ocorreu um erro ao atualizar a página: {e}")
+

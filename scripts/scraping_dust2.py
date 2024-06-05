@@ -6,10 +6,12 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 import feedparser
 import logging
+from typing import Dict, List
 
 logging.basicConfig(level=logging.INFO)
 
-def accept_cookies(driver):
+def accept_cookies(driver: webdriver.Chrome):
+    """Aceita cookies em um site."""
     try:
         cookie_button = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, '//*[@id="CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll"]'))
@@ -18,7 +20,8 @@ def accept_cookies(driver):
     except Exception as e:
         logging.error(f"Erro ao aceitar cookies: {e}")
 
-def get_news_content(news_url):
+def get_news_content(news_url: str) -> str:
+    """Coleta o conteúdo de uma notícia."""
     driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()))
     driver.get(news_url)
 
@@ -39,7 +42,8 @@ def get_news_content(news_url):
 
     return content
 
-def fetch_dust2_news():
+def fetch_dust2_news() -> List[Dict]:
+    """Coleta notícias do Dust2."""
     rss_url = "https://www.dust2.com.br/rss"
     feed = feedparser.parse(rss_url)
 
@@ -58,7 +62,8 @@ def fetch_dust2_news():
     logging.info(f"{len(news_items)} notícias coletadas do Dust2.")
     return news_items
 
-def user_interaction(news_links):
+def user_interaction(news_links: List[Dict]) -> List[Dict]:
+    """Permite ao usuário selecionar as notícias desejadas."""
     print("Links das notícias disponíveis:")
     for i, news in enumerate(news_links):
         print(f"{i + 1}. {news['title']} ({news['pubDate']}) - {news['link']}")
@@ -68,10 +73,15 @@ def user_interaction(news_links):
     if choice.lower() == 'all':
         return news_links
     else:
-        selected_indices = [int(i) - 1 for i in choice.split()]
-        return [news_links[i] for i in selected_indices]
+        try:
+            selected_indices = [int(i) - 1 for i in choice.split()]
+            return [news_links[i] for i in selected_indices]
+        except ValueError:
+            logging.error("Entrada inválida. Por favor, digite números separados por espaços ou 'all'.")
+            return []
 
 def main():
+    """Coleta notícias do Dust2."""
     news_list = fetch_dust2_news()
     return news_list
 

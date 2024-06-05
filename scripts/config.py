@@ -1,14 +1,17 @@
 from dotenv import load_dotenv
 import os
 import logging
+from typing import Dict, Any
 
 logging.basicConfig(level=logging.INFO)
 
 def load_env():
+    """Carrega variáveis de ambiente do arquivo .env."""
     load_dotenv()
     logging.info("Variáveis de ambiente carregadas.")
 
-def get_env_variable(var_name, prompt):
+def get_env_variable(var_name: str, prompt: str) -> str:
+    """Obtém uma variável de ambiente ou solicita ao usuário se não estiver definida."""
     current_value = os.getenv(var_name)
     if current_value:
         print(f"Valor atual de {var_name}: {current_value}")

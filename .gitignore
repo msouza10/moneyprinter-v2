@@ -1,0 +1,8 @@
+# Ignore todos os arquivos .db na pasta databases
+/databases/*.db
+
+# Outras regras de ignorância
+*.log
+*.pyc
+__pycache__/
+.env

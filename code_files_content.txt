@@ -1,0 +1,1386 @@
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\main.py
+Content:
+import argparse
+from scripts.scraping_hltv import main as scrape_hltv_news, get_news_content, user_interaction
+from scripts.scraping_dust2 import main as scrape_dust2_news
+from scripts.script_generation import generate_script
+from scripts.upload_to_notion import create_and_update_script
+import os
+from dotenv import load_dotenv
+from scripts.database_helper import create_database, mark_news_as_sent, is_news_sent
+from scripts.config import get_env_variable
+import logging
+from typing import Dict, List
+
+logging.basicConfig(level=logging.INFO)
+
+def format_uuid(uuid: str) -> str:
+    """Formata um UUID removendo hífens."""
+    return uuid.replace("-", "")
+
+def main():
+    """Função principal do script."""
+    load_dotenv()
+    create_database()
+
+    parser = argparse.ArgumentParser(description="Script para coletar notícias e criar scripts para Notion.")
+    parser.add_argument("--source", "--src", choices=["hltv", "dust2", "all"], required=True, help="Fonte das notícias: 'hltv', 'dust2' ou 'all'")
+    parser.add_argument("--process", "--proc", choices=["all"], help="Processar todas as notícias automaticamente")
+    args = parser.parse_args()
+
+    try:
+        token = os.getenv("NOTION_TOKEN")
+        database_id = os.getenv("NOTION_DATABASE_ID")
+
+        if not token or not database_id:
+            raise EnvironmentError("As variáveis NOTION_TOKEN e NOTION_DATABASE_ID devem estar definidas para usar o Notion.")
+
+        token = get_env_variable("NOTION_TOKEN", "Digite seu token de integração do Notion: ") if not token else token
+        database_id = format_uuid(get_env_variable("NOTION_DATABASE_ID", "Digite o ID da base de dados do Notion: ")) if not database_id else format_uuid(database_id)
+
+        if args.source in ['hltv', 'all']:
+            news_data_hltv = scrape_hltv_news()
+            process_news(news_data_hltv, token, database_id, args.process == "all")
+
+        if args.source in ['dust2', 'all']:
+            news_data_dust2 = scrape_dust2_news()
+            process_news(news_data_dust2, token, database_id, args.process == "all")
+
+    except Exception as e:
+        logging.error(f"Erro durante a execução do script: {e}")
+        print("Ocorreu um erro. Execute 'python main.py --help' para mais informações sobre como usar o script.")
+
+def process_news(news_data, token, database_id, process_all=False):
+    logging.info(f"Notícias coletadas: {len(news_data)} itens")
+    
+    if process_all:
+        selected_news = news_data  # Processa todas as notícias automaticamente
+    else:
+        selected_news = user_interaction(news_data)  # Permite interação do usuário para selecionar as notícias
+
+    for news in selected_news:
+        if is_news_sent(news['guid']):
+            logging.info(f"Notícia '{news['title']}' já foi enviada para o Notion.")
+            continue
+
+        news['content'] = get_news_content(news['link'])
+        script = generate_script(news['content'])
+        logging.info(f"Script gerado para '{news['title']}':\n{script}")
+        logging.info("="*50)
+
+        create_and_update_script(token, database_id, script)
+        mark_news_as_sent(news['guid'])
+
+if __name__ == "__main__":
+    main()
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\manage.py
+Content:
+#!/usr/bin/env python
+"""Django's command-line utility for administrative tasks."""
+import os
+import sys
+
+
+def main():
+    """Run administrative tasks."""
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ProfitPortal.settings')
+    try:
+        from django.core.management import execute_from_command_line
+    except ImportError as exc:
+        raise ImportError(
+            "Couldn't import Django. Are you sure it's installed and "
+            "available on your PYTHONPATH environment variable? Did you "
+            "forget to activate a virtual environment?"
+        ) from exc
+    execute_from_command_line(sys.argv)
+
+
+if __name__ == '__main__':
+    main()
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\admin.py
+Content:
+from django.contrib import admin
+
+# Register your models here.
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\apps.py
+Content:
+from django.apps import AppConfig
+
+
+class NewsConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'news'
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\forms.py
+Content:
+from django import forms
+from .models import APISettings
+
+class APISettingsForm(forms.ModelForm):
+    class Meta:
+        model = APISettings
+        fields = ['notion_token', 'notion_database_id', 'gemini_api_key']
+        widgets = {
+            'notion_token': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
+            'notion_database_id': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
+            'gemini_api_key': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
+        }
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\models.py
+Content:
+from django.db import models
+
+class APISettings(models.Model):
+    notion_token = models.CharField(max_length=255, blank=True, null=True)
+    notion_database_id = models.CharField(max_length=255, blank=True, null=True)
+    gemini_api_key = models.CharField(max_length=255, blank=True, null=True)
+
+    def __str__(self):
+        return "API Settings"
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\tests.py
+Content:
+from django.test import TestCase
+
+# Create your tests here.
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\urls.py
+Content:
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('', views.index, name='index'),
+    path('fetch-news/', views.fetch_news, name='fetch_news'),
+    path('list-news/', views.list_news, name='list_news'),
+    path('process-news/', views.process_news, name='process_news'),
+    path('settings/', views.settings, name='settings'),
+]
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\views.py
+Content:
+from django.shortcuts import render, redirect
+from django.contrib import messages
+from .models import APISettings
+from .forms import APISettingsForm
+from scripts.scraping_hltv import main as scrape_hltv_news, get_news_content, user_interaction
+from scripts.scraping_dust2 import main as scrape_dust2_news
+from scripts.script_generation import generate_script
+from scripts.upload_to_notion import create_and_update_script
+from scripts.config import get_env_variable
+from scripts.database_helper import create_database, mark_news_as_sent, is_news_sent
+import os
+from dotenv import load_dotenv
+import logging
+
+load_dotenv()
+create_database()
+
+news_cache = []
+
+def index(request):
+    return render(request, 'news/index.html')
+
+def fetch_news(request):
+    global news_cache
+    if request.method == 'POST':
+        source = request.POST.get('source')
+        if source not in ['hltv', 'dust2']:
+            messages.error(request, 'Fonte inválida! Por favor, selecione HLTV ou Dust2.')
+            return redirect('index')
+
+        if source == 'hltv':
+            news_cache = scrape_hltv_news()
+        else:
+            news_cache = scrape_dust2_news()
+
+        logging.info(f"Notícias coletadas: {len(news_cache)} itens")
+        messages.success(request, 'Notícias capturadas com sucesso! Selecione as notícias para processar.')
+        return redirect('list_news')
+    else:
+        return redirect('index')
+
+def list_news(request):
+    return render(request, 'news/list_news.html', {'news': news_cache})
+
+def process_news(request):
+    global news_cache
+    if request.method == 'POST':
+        selected_news_ids = request.POST.getlist('selected_news')
+        selected_news = [news for news in news_cache if news['guid'] in selected_news_ids]
+
+        settings = APISettings.objects.first()
+        token = settings.notion_token
+        database_id = settings.notion_database_id
+
+        for news in selected_news:
+            if is_news_sent(news['guid']):
+                logging.info(f"Notícia '{news['title']}' já foi enviada para o Notion.")
+                continue
+
+            news['content'] = get_news_content(news['link'])
+            script = generate_script(news['content'])
+            create_and_update_script(token, database_id, script)
+            mark_news_as_sent(news['guid'])
+
+        messages.success(request, 'Notícias processadas e enviadas para o Notion com sucesso!')
+        news_cache = [news for news in news_cache if news['guid'] not in selected_news_ids]  # Remove processed news from cache
+        return redirect('list_news')
+    else:
+        return redirect('index')
+
+def settings(request):
+    if request.method == 'POST':
+        form = APISettingsForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Configurações salvas com sucesso!')
+            return redirect('settings')
+    else:
+        settings = APISettings.objects.first()
+        form = APISettingsForm(instance=settings)
+    
+    return render(request, 'news/settings.html', {'form': form})
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\__init__.py
+Content:
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\migrations\0001_initial.py
+Content:
+# Generated by Django 5.0.6 on 2024-06-03 18:33
+
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    initial = True
+
+    dependencies = [
+    ]
+
+    operations = [
+        migrations.CreateModel(
+            name='APISettings',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('notion_token', models.CharField(blank=True, max_length=255, null=True)),
+                ('notion_database_id', models.CharField(blank=True, max_length=255, null=True)),
+                ('gemini_api_key', models.CharField(blank=True, max_length=255, null=True)),
+            ],
+        ),
+    ]
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\migrations\__init__.py
+Content:
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\index.html
+Content:
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profit Portal</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'styles.css' %}">
+</head>
+<body>
+    <header>
+        <h1>Profit Portal</h1>
+        <img src="{% static 'images/logo.png' %}" alt="Profit Portal Logo" class="logo">
+        <button id="dark-mode-toggle" aria-label="Toggle Dark Mode"><i class="fa-solid fa-sun"></i></button>
+    </header>
+
+    <main>
+        <div class="content-wrapper">
+            <form method="POST" action="{% url 'fetch_news' %}">
+                {% csrf_token %}
+                <label for="source">Selecione a Fonte:</label>
+                <select name="source" id="source" aria-labelledby="source">
+                    <option value="hltv">HLTV</option>
+                    <option value="dust2">Dust2</option>
+                </select>
+                <button type="submit">Capturar Notícias</button>
+            </form>
+
+            <a href="{% url 'settings' %}" class="button">Configurações</a>
+        </div>
+    </main>
+
+    <footer>
+        <p>© 2024 Profit Portal</p>
+    </footer>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="{% static 'scripts.js' %}"></script>
+</body>
+</html>
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\list_news.html
+Content:
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Profit Portal - Listar notícias</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'styles.css' %}">
+</head>
+<body>
+    <header>
+        <img src="{% static 'images/logo.png' %}" alt="Logo" class="logo">
+        <h1>Profit Portal - Listar notícias</h1>
+    </header>
+    <main class="container">
+        <div class="card">
+            <form method="post" action="{% url 'process_news' %}">
+                {% csrf_token %}
+                <ul>
+                    {% for news in news %}
+                    <li>
+                        <input type="checkbox" name="selected_news" value="{{ news.guid }}" id="news_{{ news.guid }}">
+                        <label for="news_{{ news.guid }}"><strong>{{ news.title }}</strong> - {{ news.pubDate }}</label>
+                    </li>
+                    {% endfor %}
+                </ul>
+                <button type="submit">Processar Notícias</button>
+            </form>
+            <a href="{% url 'index' %}" class="button">Voltar para Home</a>
+        </div>
+    </main>
+    {% if messages %}
+    <footer>
+        <ul>
+            {% for message in messages %}
+            <li>{{ message }}</li>
+            {% endfor %}
+        </ul>
+    </footer>
+    {% endif %}
+</body>
+</html>
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\settings.html
+Content:
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Profit Portal - Settings</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'styles.css' %}">
+</head>
+<body>
+    <header>
+        <img src="{% static 'images/logo.png' %}" alt="Logo" class="logo">
+        <h1>Configurações de API</h1>
+        <button id="dark-mode-toggle" aria-label="Toggle Dark Mode"><i class="fa-solid fa-sun"></i></button>
+    </header>
+    <main>
+        <div class="content-wrapper">
+            <form method="post" action="{% url 'settings' %}">
+                {% csrf_token %}
+                {{ form.as_p }}
+                <button type="submit">Salvar Configurações</button>
+            </form>
+            <a href="{% url 'index' %}" class="button">Voltar para Home</a>
+        </div>
+    </main>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="{% static 'scripts.js' %}"></script>
+</body>
+</html>
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\ProfitPortal\asgi.py
+Content:
+"""
+ASGI config for ProfitPortal project.
+
+It exposes the ASGI callable as a module-level variable named ``application``.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/5.0/howto/deployment/asgi/
+"""
+
+import os
+
+from django.core.asgi import get_asgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ProfitPortal.settings')
+
+application = get_asgi_application()
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\ProfitPortal\settings.py
+Content:
+"""
+Django settings for ProfitPortal project.
+
+Generated by 'django-admin startproject' using Django 5.0.6.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/5.0/topics/settings/
+
+For the full list of settings and their values, see
+https://docs.djangoproject.com/en/5.0/ref/settings/
+"""
+
+from pathlib import Path
+
+# Build paths inside the project like this: BASE_DIR / 'subdir'.
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+# Quick-start development settings - unsuitable for production
+# See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
+
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = 'django-insecure-xb-l4b6@-cftf5c(xsy^uawdt#o&9%3490&y(gzhv)(qg4(dh_'
+
+# SECURITY WARNING: don't run with debug turned on in production!
+DEBUG = True
+
+ALLOWED_HOSTS = []
+
+
+# Application definition
+
+INSTALLED_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'news',
+]
+
+MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+ROOT_URLCONF = 'ProfitPortal.urls'
+
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [BASE_DIR / 'templates'],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = 'ProfitPortal.wsgi.application'
+
+
+# Database
+# https://docs.djangoproject.com/en/5.0/ref/settings/#databases
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
+    }
+}
+
+
+# Password validation
+# https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
+
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+    },
+    {
+        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+    },
+    {
+        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
+    },
+    {
+        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+    },
+]
+
+
+# Internationalization
+# https://docs.djangoproject.com/en/5.0/topics/i18n/
+
+LANGUAGE_CODE = 'en-us'
+
+TIME_ZONE = 'UTC'
+
+USE_I18N = True
+
+USE_TZ = True
+
+
+# Static files (CSS, JavaScript, Images)
+# https://docs.djangoproject.com/en/5.0/howto/static-files/
+
+STATIC_URL = '/static/'
+STATICFILES_DIRS = [BASE_DIR / 'static']
+
+# Default primary key field type
+# https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\ProfitPortal\urls.py
+Content:
+"""
+URL configuration for ProfitPortal project.
+
+The `urlpatterns` list routes URLs to views. For more information please see:
+    https://docs.djangoproject.com/en/5.0/topics/http/urls/
+Examples:
+Function views
+    1. Add an import:  from my_app import views
+    2. Add a URL to urlpatterns:  path('', views.home, name='home')
+Class-based views
+    1. Add an import:  from other_app.views import Home
+    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
+Including another URLconf
+    1. Import the include() function: from django.urls import include, path
+    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+"""
+from django.contrib import admin
+from django.urls import path, include
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('', include('news.urls')),
+]
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\ProfitPortal\wsgi.py
+Content:
+"""
+WSGI config for ProfitPortal project.
+
+It exposes the WSGI callable as a module-level variable named ``application``.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/5.0/howto/deployment/wsgi/
+"""
+
+import os
+
+from django.core.wsgi import get_wsgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ProfitPortal.settings')
+
+application = get_wsgi_application()
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\ProfitPortal\__init__.py
+Content:
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\config.py
+Content:
+from dotenv import load_dotenv
+import os
+import logging
+from typing import Dict, Any
+
+logging.basicConfig(level=logging.INFO)
+
+def load_env():
+    """Carrega variáveis de ambiente do arquivo .env."""
+    load_dotenv()
+    logging.info("Variáveis de ambiente carregadas.")
+
+def get_env_variable(var_name: str, prompt: str) -> str:
+    """Obtém uma variável de ambiente ou solicita ao usuário se não estiver definida."""
+    current_value = os.getenv(var_name)
+    if current_value:
+        print(f"Valor atual de {var_name}: {current_value}")
+        change = input(f"Deseja mudar {var_name}? (sim/nao): ").strip().lower()
+        if change == 'sim':
+            new_value = input(prompt).strip()
+            os.environ[var_name] = new_value
+            return new_value
+        else:
+            return current_value
+    else:
+        new_value = input(prompt).strip()
+        os.environ[var_name] = new_value
+        return new_value
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\database_helper.py
+Content:
+import sqlite3
+import logging
+from typing import Dict, List
+
+logging.basicConfig(level=logging.INFO)
+
+def create_database(db_path: str = 'news_sent.db'):
+    """Cria ou verifica se o banco de dados SQLite já existe."""
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''CREATE TABLE IF NOT EXISTS news_sent
+                              (id INTEGER PRIMARY KEY, guid TEXT UNIQUE)''')
+            conn.commit()
+        logging.info("Banco de dados criado ou verificado com sucesso.")
+    except Exception as e:
+        logging.error(f"Erro ao criar/verificar o banco de dados: {e}")
+
+def mark_news_as_sent(guid: str, db_path: str = 'news_sent.db'):
+    """Marca a notícia com o GUID fornecido como enviada no banco de dados."""
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("INSERT OR IGNORE INTO news_sent (guid) VALUES (?)", (guid,))
+            conn.commit()
+        logging.info(f"Notícia com GUID {guid} marcada como enviada.")
+    except Exception as e:
+        logging.error(f"Erro ao marcar notícia como enviada: {e}")
+
+def is_news_sent(guid: str, db_path: str = 'news_sent.db') -> bool:
+    """Verifica se a notícia com o GUID fornecido já foi enviada."""
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM news_sent WHERE guid=?", (guid,))
+            result = cursor.fetchone()
+        return result is not None
+    except Exception as e:
+        logging.error(f"Erro ao verificar se a notícia foi enviada: {e}")
+        return False
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\scraping_dust2.py
+Content:
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+import feedparser
+import logging
+from typing import Dict, List
+
+logging.basicConfig(level=logging.INFO)
+
+def accept_cookies(driver: webdriver.Chrome):
+    """Aceita cookies em um site."""
+    try:
+        cookie_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, '//*[@id="CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll"]'))
+        )
+        cookie_button.click()
+    except Exception as e:
+        logging.error(f"Erro ao aceitar cookies: {e}")
+
+def get_news_content(news_url: str) -> str:
+    """Coleta o conteúdo de uma notícia."""
+    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()))
+    driver.get(news_url)
+
+    try:
+        accept_cookies(driver)
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.TAG_NAME, 'p'))
+        )
+        paragraphs = driver.find_elements(By.TAG_NAME, 'p')
+        content = ' '.join([p.text for p in paragraphs])
+        content = content.encode('ascii', 'ignore').decode('ascii')
+        logging.info(f"Conteúdo coletado da notícia: {news_url}")
+    except Exception as e:
+        logging.error(f"Erro ao coletar conteúdo da notícia: {e}")
+        content = "N/A"
+    finally:
+        driver.quit()
+
+    return content
+
+def fetch_dust2_news() -> List[Dict]:
+    """Coleta notícias do Dust2."""
+    rss_url = "https://www.dust2.com.br/rss"
+    feed = feedparser.parse(rss_url)
+
+    news_items = []
+    for entry in feed.entries:
+        news_item = {
+            "title": entry.title,
+            "description": entry.description,
+            "link": entry.link,
+            "guid": entry.guid,
+            "pubDate": entry.published,
+            "media_content": entry.get('media_content', [{}])[0].get('url', None)
+        }
+        news_items.append(news_item)
+
+    logging.info(f"{len(news_items)} notícias coletadas do Dust2.")
+    return news_items
+
+def user_interaction(news_links: List[Dict]) -> List[Dict]:
+    """Permite ao usuário selecionar as notícias desejadas."""
+    print("Links das notícias disponíveis:")
+    for i, news in enumerate(news_links):
+        print(f"{i + 1}. {news['title']} ({news['pubDate']}) - {news['link']}")
+
+    choice = input("Digite o número da notícia que você deseja coletar (ou 'all' para todas): ")
+
+    if choice.lower() == 'all':
+        return news_links
+    else:
+        try:
+            selected_indices = [int(i) - 1 for i in choice.split()]
+            return [news_links[i] for i in selected_indices]
+        except ValueError:
+            logging.error("Entrada inválida. Por favor, digite números separados por espaços ou 'all'.")
+            return []
+
+def main():
+    """Coleta notícias do Dust2."""
+    news_list = fetch_dust2_news()
+    return news_list
+
+if __name__ == "__main__":
+    main()
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\scraping_hltv.py
+Content:
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+import feedparser
+import logging
+from typing import Dict, List
+
+logging.basicConfig(level=logging.INFO)
+
+def accept_cookies(driver: webdriver.Chrome):
+    """Aceita cookies em um site."""
+    try:
+        cookie_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, '//*[@id="CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll"]'))
+        )
+        cookie_button.click()
+    except Exception as e:
+        logging.error(f"Erro ao aceitar cookies: {e}")
+
+def get_news_content(news_url: str) -> str:
+    """Coleta o conteúdo de uma notícia."""
+    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()))
+    driver.get(news_url)
+
+    try:
+        accept_cookies(driver)
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.TAG_NAME, 'p'))
+        )
+        paragraphs = driver.find_elements(By.TAG_NAME, 'p')
+        content = ' '.join([p.text for p in paragraphs])
+        content = content.encode('ascii', 'ignore').decode('ascii')
+        logging.info(f"Conteúdo coletado da notícia: {news_url}")
+    except Exception as e:
+        logging.error(f"Erro ao coletar conteúdo da notícia: {e}")
+        content = "N/A"
+    finally:
+        driver.quit()
+
+    return content
+
+def fetch_hltv_news() -> List[Dict]:
+    """Coleta notícias do HLTV."""
+    rss_url = "https://www.hltv.org/rss/news"
+    feed = feedparser.parse(rss_url)
+
+    news_items = []
+    for entry in feed.entries:
+        news_item = {
+            "title": entry.title,
+            "description": entry.description,
+            "link": entry.link,
+            "guid": entry.guid,
+            "pubDate": entry.published,
+            "media_content": entry.get('media_content', [{}])[0].get('url', None)
+        }
+        news_items.append(news_item)
+
+    logging.info(f"{len(news_items)} notícias coletadas do HLTV.")
+    return news_items
+
+def user_interaction(news_links: List[Dict]) -> List[Dict]:
+    """Permite ao usuário selecionar as notícias desejadas."""
+    print("Links das notícias disponíveis:")
+    for i, news in enumerate(news_links):
+        print(f"{i + 1}. {news['title']} ({news['pubDate']}) - {news['link']}")
+
+    choice = input("Digite o número da notícia que você deseja coletar (ou 'all' para todas): ")
+
+    if choice.lower() == 'all':
+        return news_links
+    else:
+        try:
+            selected_indices = [int(i) - 1 for i in choice.split()]
+            return [news_links[i] for i in selected_indices]
+        except ValueError:
+            logging.error("Entrada inválida. Por favor, digite números separados por espaços ou 'all'.")
+            return []
+
+def main():
+    """Coleta notícias do HLTV."""
+    news_list = fetch_hltv_news()
+    return news_list
+
+if __name__ == "__main__":
+    main()
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\script_generation.py
+Content:
+import os
+import google.generativeai as genai
+import logging
+from typing import Dict, Any
+
+logging.basicConfig(level=logging.INFO)
+
+def configure_api():
+    """Configura a API do Google Generative AI."""
+    try:
+        os.environ["GEMINI_API_KEY"] = "AIzaSyD-fwsx8o7mGgZa5BYIt9uKOAPIXCA47qU"
+        genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+        logging.info("API do Google Generative AI configurada com sucesso.")
+    except Exception as e:
+        logging.error(f"Erro ao configurar a API do Google Generative AI: {e}")
+
+# Configurações de geração de texto
+generation_config = {
+    "temperature": 1,
+    "top_p": 0.95,
+    "top_k": 64,
+    "max_output_tokens": 8192,
+    "response_mime_type": "text/plain",
+}
+
+# Configurações de segurança
+safety_settings = [
+    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+]
+
+# Instruções do sistema para o modelo
+system_instruction = (
+    "Aja como um Jornalista de Counter-Strike com mais de 20 anos de experiência e completamente apaixonado pelo jogo e pelas competições. "
+    "Seu trabalho será criar vídeos de notícias de Counter-Strike baseados em artigos disponibilizados para você. O seu principal objetivo é conseguir prender os espectadores nas notícias. "
+    "Você faz parte de um Canal chamado RouundEco. Utilize uma linguagem que o público do mundo de Counter-Strike entenderia, mas sem exagerar.\n\n"
+    "O roteiro deve incluir os seguintes elementos:\n\n"
+    "Roteiro para Vídeo Curto\n"
+    "Tempo total: Tempo estimado para o vídeo de acordo com o roteiro e voice over. (O vídeo não deve exceder 1 minuto.)\n\n"
+    "Objetivo: Informar sobre o artigo.\n\n"
+    "Storyboard e Timing\n"
+    "Abertura (tempo estimado)\n"
+    "Visual: Descreva o que deve aparecer na tela durante a abertura.\n"
+    "Voice Over: Escreva o que deve ser falado durante a abertura. (ESSENCIAL: NÃO ESQUECER DE FORNECER O VOICE OVER PARA CADA SEGMENTO)\n"
+    "(3-15 segundos)\n"
+    "Visual: Descreva o que deve aparecer na tela durante este intervalo.\n"
+    "Voice Over: Escreva o que deve ser falado durante este intervalo. (ESSENCIAL: NÃO ESQUECER DE FORNECER O VOICE OVER PARA CADA SEGMENTO)\n"
+    "Texto na tela: Descreva o texto que deve aparecer na tela (usar com cuidado).\n"
+    "Links relevantes AI:\n"
+    "Link - O que o link descreve - https://exemple.com\n"
+    "Voice Over Completo: Escreva o que deve ser falado durante o vídeo, detalhando cada segmento para ser utilizado por ferramentas de voz generativa. (ESSENCIAL: NÃO ESQUECER DE FORNECER O VOICE OVER PARA CADA SEGMENTO)\n\n"
+    "TAGS: Liste as tags que devem ser utilizadas, garantindo que sejam adequadas para YouTube e TikTok. deve conter #\n\n"
+    "Descrição: Forneça uma descrição concisa e cativante para o vídeo que será usada nas plataformas de vídeo utilizando a fonte da notícia.\n\n"
+    "Observações:\n\n"
+    "Detalhe o que devemos levar em consideração no vídeo.\n"
+    "Informações Omitidas: Liste todas as informações que não foram transmitidas no Voice Over e StoryBoard que existem no artigo.\n\n"
+    "Informações Adicionais: Liste todas as informações que não existem no artigo que poderiam ser transmitidas."
+)
+
+def generate_script(article: str) -> str:
+    """Gera um script para vídeo a partir de um artigo."""
+    configure_api()
+    try:
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-pro",
+            safety_settings=safety_settings,
+            generation_config=generation_config,
+            system_instruction=system_instruction,
+        )
+        chat_session = model.start_chat(
+            history=[
+                {
+                    "role": "user",
+                    "parts": [article]
+                }
+            ]
+        )
+        response = chat_session.send_message(article)
+        logging.info("Script gerado com sucesso.")
+        return response.text
+    except Exception as e:
+        logging.error(f"Erro ao gerar o script: {e}")
+        return "Erro ao gerar o script."
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\upload_to_notion.py
+Content:
+from notion_client import Client
+import logging
+
+logging.basicConfig(level=logging.INFO)
+
+def split_text(text, max_length):
+    """Divide o texto em partes de no máximo max_length caracteres, mantendo quebras de linha."""
+    paragraphs = text.split('\n')
+    parts = []
+    current_part = ""
+
+    for paragraph in paragraphs:
+        if len(current_part) + len(paragraph) + 1 > max_length:
+            parts.append(current_part)
+            current_part = paragraph
+        else:
+            if current_part:
+                current_part += '\n'
+            current_part += paragraph
+
+    if current_part:
+        parts.append(current_part)
+    
+    return parts
+
+def create_and_update_script(token, database_id, script):
+    notion = Client(auth=token)
+
+    # Dividir o script em partes de 1500 caracteres
+    script_parts = split_text(script, 1500)
+
+    # Extrair a primeira linha do script para o título
+    title = script.split('\n')[0] if script else "Sem Título"
+
+    # Criar a página
+    try:
+        response = notion.pages.create(
+            parent={"database_id": database_id},
+            properties={
+                "title": {
+                    "title": [
+                        {
+                            "type": "text",
+                            "text": {
+                                "content": title
+                            }
+                        }
+                    ]
+                }
+            },
+            children=[
+                {
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [
+                            {
+                                "type": "text",
+                                "text": {
+                                    "content": script_parts[0]
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        )
+        page_id = response['id']
+        logging.info(f"Página do script '{title}' criada com sucesso: {response}")
+    except Exception as e:
+        logging.error(f"Ocorreu um erro ao criar a página: {e}")
+        return
+
+    # Atualizar a página com as partes restantes
+    for part in script_parts[1:]:
+        try:
+            response = notion.blocks.children.append(
+                block_id=page_id,
+                children=[
+                    {
+                        "object": "block",
+                        "type": "paragraph",
+                        "paragraph": {
+                            "rich_text": [
+                                {
+                                    "type": "text",
+                                    "text": {
+                                        "content": part
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            )
+            logging.info(f"Parte do script adicionada com sucesso: {response}")
+        except Exception as e:
+            logging.error(f"Ocorreu um erro ao atualizar a página: {e}")
+
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\static\scripts.js
+Content:
+document.addEventListener("DOMContentLoaded", function() {
+    const darkModeToggle = document.getElementById("dark-mode-toggle");
+    const icon = darkModeToggle.querySelector('i');
+
+    // Verifica o modo atual ao carregar a página
+    if (document.body.classList.contains('light-mode')) {
+        icon.classList.remove('fa-sun');
+        icon.classList.add('fa-moon');
+    } else {
+        icon.classList.remove('fa-moon');
+        icon.classList.add('fa-sun');
+    }
+
+    darkModeToggle.addEventListener("click", function() {
+        document.body.classList.toggle("light-mode");
+
+        if (document.body.classList.contains('light-mode')) {
+            icon.classList.remove('fa-sun');
+            icon.classList.add('fa-moon');
+        } else {
+            icon.classList.remove('fa-moon');
+            icon.classList.add('fa-sun');
+        }
+    });
+});
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\static\styles.css
+Content:
+body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    background-color: #121212;
+    color: #FFFFFF;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    text-align: center;
+    transition: background-color 0.5s, color 0.5s;
+}
+
+body.light-mode {
+    background-color: #FFFFFF;
+    color: #000000;
+}
+
+header, main, footer {
+    width: 100%;
+    max-width: 1200px;
+    padding: 20px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+h1 {
+    color: #1DB954;
+    font-size: 3rem;
+    margin-bottom: 20px;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.content-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background-color: #1C1C1C;
+    padding: 20px;
+    border-radius: 10px;
+}
+
+form {
+    margin-bottom: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+label, select, input[type="text"], input[type="password"], button {
+    margin: 10px 0;
+    padding: 10px;
+    font-size: 1rem;
+    border: none;
+    border-radius: 5px;
+    width: 100%;
+    max-width: 300px;
+}
+
+select, input[type="text"], input[type="password"] {
+    background-color: #282828;
+    color: #FFFFFF;
+    border: 3px solid #00000052;
+}
+
+body.light-mode select, body.light-mode input[type="text"], body.light-mode input[type="password"] {
+    background-color: #FFFFFF;
+    color: #000000;
+    border: 1px solid #ddd;
+}
+
+button {
+    background-color: #1DB954;
+    color: #FFFFFF;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.3s ease, transform 0.3s ease;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+button:hover {
+    background-color: #1AA34A;
+    transform: scale(1.05);
+}
+
+ul {
+    list-style-type: none;
+    padding: 0;
+}
+
+li {
+    padding: 10px;
+    background: #282828;
+    margin-bottom: 5px;
+    border: 1px solid #1DB954;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+li input[type="checkbox"]:checked + label {
+    background-color: #1DB954;
+    color: #121212;
+}
+
+body.light-mode li {
+    background: #FFFFFF;
+    color: #000000;
+    border: 1px solid #ddd;
+}
+
+.logo {
+    width: 200px;
+    height: auto;
+    margin-bottom: 20px;
+    animation: fadeIn 2s ease-in-out;
+}
+
+#dark-mode-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 24px;
+    color: #1DB954;
+    margin-top: 20px;
+    box-shadow: none; /* Remover sombra */
+    transition: color 0.3s ease, transform 0.3s ease; /* Adiciona transição para cor e transformação */
+}
+
+body.light-mode #dark-mode-toggle {
+    color: #000000;
+}
+
+#dark-mode-toggle:hover {
+    transform: scale(1.05); /* Adiciona transformação ao passar o mouse */
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@media (max-width: 768px) {
+    header, main, footer {
+        padding: 10px;
+    }
+
+    h1 {
+        font-size: 2.5rem;
+    }
+
+    form {
+        width: 90%;
+    }
+
+    .logo {
+        width: 150px;
+    }
+}
+
+.custom-textbox {
+    width: 300px;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 16px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.custom-textbox:focus {
+    border-color: #1DB954;  /* Mudar a cor da borda para verde */
+    box-shadow: 0 0 5px rgba(29, 185, 84, 0.5);  /* Ajustar a sombra */
+    outline: none;
+}
+
+.custom-textbox::placeholder {
+    color: #888;
+    font-style: italic;
+}
+
+.button {
+    background-color: #b93f1d;
+    color: #FFFFFF;
+    padding: 10px 20px;
+    border-radius: 5px;
+    text-decoration: none;
+    display: inline-block;
+    margin-top: 10px;
+    transition: background-color 0.3s ease, transform 0.3s ease;
+}
+
+.button:hover {
+    background-color: #a32f1a;
+    transform: scale(1.05);
+}
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\tests\test_config.py
+Content:
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\tests\test_database_helper.py
+Content:
+import unittest
+from scripts.database_helper import create_database, mark_news_as_sent, is_news_sent
+import sqlite3
+import os
+
+class TestDatabaseHelper(unittest.TestCase):
+
+    def setUp(self):
+        self.db_path = 'test_news_sent.db'
+        create_database(self.db_path)
+        self.conn = sqlite3.connect(self.db_path)
+        self.cursor = self.conn.cursor()
+
+    def tearDown(self):
+        # Verifica se o cursor e a conexão estão abertos antes de fechá-los
+        if self.cursor:
+            try:
+                self.cursor.close()
+            except sqlite3.ProgrammingError:
+                pass  # O cursor já foi fechado
+        if self.conn:
+            try:
+                self.conn.close()
+            except sqlite3.ProgrammingError:
+                pass  # A conexão já foi fechada
+        try:
+            os.remove(self.db_path)
+        except PermissionError:
+            pass
+
+    def test_mark_news_as_sent(self):
+        guid = "test_guid"
+        mark_news_as_sent(guid, self.db_path)
+        # Fechar conexão antes de reabrir
+        if self.conn:
+            self.conn.close()
+        self.conn = sqlite3.connect(self.db_path)  # Reabra a conexão para verificar
+        self.cursor = self.conn.cursor()
+        self.cursor.execute("SELECT * FROM news_sent WHERE guid=?", (guid,))
+        result = self.cursor.fetchone()
+        self.assertIsNotNone(result)
+        self.cursor.close()
+        self.conn.close()
+
+    def test_is_news_sent(self):
+        guid = "test_guid"
+        mark_news_as_sent(guid, self.db_path)
+        # Fechar conexão antes de reabrir
+        if self.conn:
+            self.conn.close()
+        self.assertTrue(is_news_sent(guid, self.db_path))
+        self.assertFalse(is_news_sent("nonexistent_guid", self.db_path))
+
+if __name__ == '__main__':
+    unittest.main()
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\tests\__init__.py
+Content:
+
+--------------------------------------------------------------------------------
