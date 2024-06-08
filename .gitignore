@@ -6,5 +6,8 @@
 *.pyc
 __pycache__/
 .env
-.txt
+code_files_content.txt
 
+db.sqlite3
+code_files_content.txt
+.gitignore

@@ -11,12 +11,14 @@ O Moneyprinter-v2 é uma ferramenta poderosa que automatiza o processo de transf
     * **Tags Relevantes:** Hashtags otimizadas para YouTube e TikTok.
     * **Descrição Envolvente:** Descrição concisa e cativante para o seu vídeo.
     * **Observações:** Informações extras para te ajudar a criar o vídeo de forma mais eficaz.
-* **Integração Seamless com o Notion:** O script gerado é enviado diretamente para o seu banco de dados do Notion, pronto para ser editado e organizado. 
+* **Integração Seamless com o Notion:** O script gerado é enviado diretamente para o seu banco de dados do Notion, pronto para ser editado e organizado.
 * **Controle Total sobre o Processo:** Você escolhe quais notícias deseja processar e gerencia os scripts enviados com total autonomia.
+* **Busca de Clipes na Twitch:** Busque clipes populares de CS2 na Twitch filtrando por período e duração.
+* **Armazenamento de IDs de Jogos:** IDs de jogos utilizados são armazenados e podem ser reutilizados.
 
 **Como Usar:**
 
-**1. Instalação:**
+### 1. Instalação:
 
 1. **Requisitos:** Certifique-se de ter o Python 3.8 ou superior instalado.
 2. **Ambiente Virtual:** Crie um ambiente virtual: `python -m venv env`
@@ -26,10 +28,12 @@ O Moneyprinter-v2 é uma ferramenta poderosa que automatiza o processo de transf
     * `NOTION_TOKEN`: Seu token de integração do Notion.
     * `NOTION_DATABASE_ID`: O ID do seu banco de dados do Notion.
     * `GEMINI_API_KEY`: Sua chave API do Google Generative AI.
+    * `TWITCH_CLIENT_ID`: Seu ID de cliente da Twitch.
+    * `TWITCH_CLIENT_SECRET`: Seu segredo de cliente da Twitch.
 
-**2. Execução:**
+### 2. Execução:
 
-**a) Interface Web:**
+#### a) Interface Web:
 
 1. **Migrações do Banco de Dados:** Execute `python manage.py migrate` para aplicar as migrações.
 2. **Servidor Django:** Inicie o servidor de desenvolvimento Django: `python manage.py runserver`
@@ -39,14 +43,23 @@ O Moneyprinter-v2 é uma ferramenta poderosa que automatiza o processo de transf
 6. **Seleção de Notícias:** Escolha as notícias que deseja transformar em scripts.
 7. **Processamento:** Clique em "Processar Notícias" para gerar os scripts e enviá-los para o seu Notion.
 
-**b) Console:**
+#### b) Console:
 
-1. **Argumentos:** Utilize os seguintes argumentos de linha de comando:
-    * `--source`: A fonte das notícias (hltv, dust2, all).
-    * `--process`: Processar todas as notícias automaticamente (all).
-2. **Exemplo:** `python main.py --source hltv --process all` para coletar e processar todas as notícias do HLTV.
+1. **Busca de ID de Jogo:**
+    * `python main.py --search-game "Counter-Strike"` para buscar o ID do jogo na Twitch.
+2. **Listagem de IDs de Jogos Usados:**
+    * `python main.py --list-games` para listar os IDs de jogos usados anteriormente.
+3. **Busca de Clipes na Twitch:**
+    * `python main.py --fetch-clips --game-id <GAME_ID> --period week --min-duration 40 --max-duration 90`
+4. **Coleta e Processamento de Notícias:**
+    * Utilize os seguintes argumentos de linha de comando:
+        * `--source`: A fonte das notícias (hltv, dust2, all).
+        * `--process`: Processar todas as notícias automaticamente (all).
+    * Exemplo: `python main.py --source hltv --process all` para coletar e processar todas as notícias do HLTV.
 
-**Estrutura do Projeto:**
+### Estrutura do Projeto:
+
+
 
 ```
 ProfitPortal/
@@ -79,6 +92,7 @@ ProfitPortal/
     └── upload_to_notion.py
 ```
 
+
 **Vantagens:**
 
 * **Eficiência:** Automatiza o processo de criação de scripts, liberando seu tempo para outras tarefas.
@@ -101,5 +115,4 @@ Se você deseja contribuir com o Moneyprinter-v2, siga estas etapas:
 **Licença:**
 
 Este projeto é licenciado sob a Licença MIT.
-
 

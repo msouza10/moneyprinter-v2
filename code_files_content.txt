@@ -5,28 +5,63 @@ from scripts.scraping_hltv import main as scrape_hltv_news, get_news_content, us
 from scripts.scraping_dust2 import main as scrape_dust2_news
 from scripts.script_generation import generate_script
 from scripts.upload_to_notion import create_and_update_script
+from scripts.fetch_clips import fetch_cs2_clips  # Importar a nova função
 import os
 from dotenv import load_dotenv
 from scripts.database_helper import create_database, mark_news_as_sent, is_news_sent
 from scripts.config import get_env_variable
 import logging
 from typing import Dict, List
+import asyncio
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Create handlers
+console_handler = logging.StreamHandler()
+file_handler = logging.FileHandler('app.log')
+
+# Set levels for handlers
+console_handler.setLevel(logging.INFO)
+file_handler.setLevel(logging.INFO)
+
+# Create formatter and add it to handlers
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+file_handler.setFormatter(formatter)
+
+# Get the logger and add the handlers
+logger = logging.getLogger()
+logger.addHandler(console_handler)
+logger.addHandler(file_handler)
 
 def format_uuid(uuid: str) -> str:
     """Formata um UUID removendo hífens."""
     return uuid.replace("-", "")
 
-def main():
+async def fetch_and_collect_clips(twitch, num_clips, min_duration, max_duration):  # Adicionar 'twitch' como argumento
+    clips = []
+    async for clip in twitch.get_clips(game_id=game_id, started_at=datetime.now() - timedelta(days=7), first=num_clips):
+        if min_duration <= clip['duration'] <= max_duration:
+            clips.append(clip)
+    return clips
+
+async def main():
     """Função principal do script."""
+    logger.info("Iniciando a função main")
     load_dotenv()
-    create_database()
+    logger.info("Variáveis de ambiente carregadas")
+    create_database(db_name='news_sent.db', db_dir='./databases')
+    logger.info("Banco de dados verificado/criado")
 
     parser = argparse.ArgumentParser(description="Script para coletar notícias e criar scripts para Notion.")
     parser.add_argument("--source", "--src", choices=["hltv", "dust2", "all"], required=True, help="Fonte das notícias: 'hltv', 'dust2' ou 'all'")
     parser.add_argument("--process", "--proc", choices=["all"], help="Processar todas as notícias automaticamente")
+    parser.add_argument("--fetch-clips", action='store_true', help="Busca os clipes mais populares de CS2 na Twitch")  # Adicionar a opção --fetch-clips
+    parser.add_argument("--min-duration", type=int, default=40, help="Duração mínima dos clipes em segundos")
+    parser.add_argument("--max-duration", type=int, default=90, help="Duração máxima dos clipes em segundos")
     args = parser.parse_args()
+    logger.info(f"Argumentos recebidos: {args}")
 
     try:
         token = os.getenv("NOTION_TOKEN")
@@ -38,20 +73,29 @@ def main():
         token = get_env_variable("NOTION_TOKEN", "Digite seu token de integração do Notion: ") if not token else token
         database_id = format_uuid(get_env_variable("NOTION_DATABASE_ID", "Digite o ID da base de dados do Notion: ")) if not database_id else format_uuid(database_id)
 
+        if args.fetch_clips:
+            logger.info("Iniciando a busca de clipes de CS2")
+            clips = await fetch_and_collect_clips(twitch, num_clips=10, min_duration=args.min_duration, max_duration=args.max_duration)            
+            logger.info(f"{len(clips)} clipes de CS2 coletados")
+            for clip in clips:
+                logger.info(f"Clip: {clip['title']} - {clip['url']} - {clip['duration']}s")
+
         if args.source in ['hltv', 'all']:
+            logger.info("Coletando notícias do HLTV")
             news_data_hltv = scrape_hltv_news()
             process_news(news_data_hltv, token, database_id, args.process == "all")
 
         if args.source in ['dust2', 'all']:
+            logger.info("Coletando notícias do Dust2")
             news_data_dust2 = scrape_dust2_news()
             process_news(news_data_dust2, token, database_id, args.process == "all")
 
     except Exception as e:
-        logging.error(f"Erro durante a execução do script: {e}")
+        logger.error(f"Erro durante a execução do script: {e}")
         print("Ocorreu um erro. Execute 'python main.py --help' para mais informações sobre como usar o script.")
 
 def process_news(news_data, token, database_id, process_all=False):
-    logging.info(f"Notícias coletadas: {len(news_data)} itens")
+    logger.info(f"Notícias coletadas: {len(news_data)} itens")
     
     if process_all:
         selected_news = news_data  # Processa todas as notícias automaticamente
@@ -59,20 +103,21 @@ def process_news(news_data, token, database_id, process_all=False):
         selected_news = user_interaction(news_data)  # Permite interação do usuário para selecionar as notícias
 
     for news in selected_news:
-        if is_news_sent(news['guid']):
-            logging.info(f"Notícia '{news['title']}' já foi enviada para o Notion.")
+        if is_news_sent(news['guid'], db_name='news_sent.db', db_dir='./databases'):
+            logger.info(f"Notícia '{news['title']}' já foi enviada para o Notion.")
             continue
 
         news['content'] = get_news_content(news['link'])
         script = generate_script(news['content'])
-        logging.info(f"Script gerado para '{news['title']}':\n{script}")
-        logging.info("="*50)
+        logger.info(f"Script gerado para '{news['title']}':\n{script}")
+        logger.info("="*50)
 
         create_and_update_script(token, database_id, script)
-        mark_news_as_sent(news['guid'])
+        mark_news_as_sent(news['guid'], db_name='news_sent.db', db_dir='./databases')
 
 if __name__ == "__main__":
-    main()
+    logger.info("Executando o script principal diretamente")
+    asyncio.run(main())
 
 --------------------------------------------------------------------------------
 
@@ -663,24 +708,30 @@ Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\database_helper.py
 Content:
 import sqlite3
 import logging
+import os
 from typing import Dict, List
 
 logging.basicConfig(level=logging.INFO)
 
-def create_database(db_path: str = 'news_sent.db'):
+def create_database(db_name: str = 'news_sent.db', db_dir: str = './databases'):
     """Cria ou verifica se o banco de dados SQLite já existe."""
+    os.makedirs(db_dir, exist_ok=True)
+    db_path = os.path.join(db_dir, db_name)
+    
     try:
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''CREATE TABLE IF NOT EXISTS news_sent
                               (id INTEGER PRIMARY KEY, guid TEXT UNIQUE)''')
             conn.commit()
-        logging.info("Banco de dados criado ou verificado com sucesso.")
+        logging.info(f"Banco de dados criado ou verificado com sucesso: {db_path}")
     except Exception as e:
         logging.error(f"Erro ao criar/verificar o banco de dados: {e}")
 
-def mark_news_as_sent(guid: str, db_path: str = 'news_sent.db'):
+def mark_news_as_sent(guid: str, db_name: str = 'news_sent.db', db_dir: str = './databases'):
     """Marca a notícia com o GUID fornecido como enviada no banco de dados."""
+    db_path = os.path.join(db_dir, db_name)
+    
     try:
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
@@ -690,8 +741,10 @@ def mark_news_as_sent(guid: str, db_path: str = 'news_sent.db'):
     except Exception as e:
         logging.error(f"Erro ao marcar notícia como enviada: {e}")
 
-def is_news_sent(guid: str, db_path: str = 'news_sent.db') -> bool:
+def is_news_sent(guid: str, db_name: str = 'news_sent.db', db_dir: str = './databases') -> bool:
     """Verifica se a notícia com o GUID fornecido já foi enviada."""
+    db_path = os.path.join(db_dir, db_name)
+    
     try:
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
@@ -701,6 +754,50 @@ def is_news_sent(guid: str, db_path: str = 'news_sent.db') -> bool:
     except Exception as e:
         logging.error(f"Erro ao verificar se a notícia foi enviada: {e}")
         return False
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\fetch_clips.py
+Content:
+from twitchAPI.twitch import Twitch
+from datetime import datetime, timedelta
+import logging
+import os
+import asyncio
+
+logging.basicConfig(level=logging.INFO)
+
+async def fetch_cs2_clips(num_clips: int = 10, min_duration: int = 40, max_duration: int = 90) -> list:
+    """Busca os clipes mais populares de CS2 na Twitch, filtrando por duração."""
+    logging.info("Iniciando a função fetch_cs2_clips")
+    twitch = await Twitch(os.getenv("TWITCH_CLIENT_ID"), os.getenv("TWITCH_CLIENT_SECRET"))
+    logging.info("Twitch client inicializado")
+    await twitch.authenticate_app([])
+    logging.info("Autenticação do app concluída")
+    game_data = await twitch.get_games(names=['Counter-Strike 2'])
+    logging.info(f"Dados do jogo obtidos: {game_data}")
+    game_id = game_data['data'][0]['id']
+    logging.info(f"ID do jogo CS2: {game_id}")
+    
+    clips = []
+    async for clip in twitch.get_clips(game_id=game_id, started_at=datetime.now() - timedelta(days=7), first=num_clips):
+        logging.info(f"Clip encontrado: {clip['title']} com duração de {clip['duration']} segundos")
+        if min_duration <= clip['duration'] <= max_duration:
+            clips.append(clip)
+    
+    logging.info(f"Total de clipes filtrados: {len(clips)}")
+    return clips
+
+async def main_fetch_clips():
+    logging.info("Iniciando a função main do fetch_clips.py")
+    clips = await fetch_cs2_clips()
+    logging.info(f"{len(clips)} clipes de CS2 coletados")
+    for clip in clips:
+        logging.info(f"Clip: {clip['title']} - {clip['url']} - {clip['duration']}s")
+
+if __name__ == "__main__":
+    logging.info("Executando o script fetch_clips.py diretamente")
+    asyncio.run(main_fetch_clips())
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\scraping_dust2.py
