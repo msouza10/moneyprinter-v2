@@ -89,7 +89,8 @@ ProfitPortal/
     ├── scraping_dust2.py
     ├── scraping_hltv.py
     ├── script_generation.py
-    └── upload_to_notion.py
+    ├── upload_to_notion.py
+    └── twitch_clips.py
 ```
 
 
