@@ -1,25 +1,44 @@
+from django.contrib.auth.decorators import login_required, user_passes_test
 from django.shortcuts import render, redirect
+from .forms import CustomAuthenticationForm, RegisterForm, APISettingsForm
 from django.contrib import messages
+from django.contrib.auth import authenticate, login
 from .models import APISettings
-from .forms import APISettingsForm
 from scripts.scraping_hltv import main as scrape_hltv_news, get_news_content, user_interaction
 from scripts.scraping_dust2 import main as scrape_dust2_news
 from scripts.script_generation import generate_script
 from scripts.upload_to_notion import create_and_update_script
-from scripts.config import get_env_variable
-from scripts.database_helper import create_database, mark_news_as_sent, is_news_sent
-import os
-from dotenv import load_dotenv
-import logging
-
-load_dotenv()
-create_database()
+from scripts.database_helper import mark_news_as_sent, is_news_sent
 
 news_cache = []
 
+def login_view(request):
+    if request.method == 'POST':
+        form = CustomAuthenticationForm(request, data=request.POST)
+        if form.is_valid():
+            username = form.cleaned_data.get('username')
+            password = form.cleaned_data.get('password')
+            user = authenticate(username=username, password=password)
+            if user is not None:
+                login(request, user)
+                return redirect('index')
+            else:
+                messages.error(request, 'Usuário ou senha incorretos.')
+        else:
+            messages.error(request, 'Informações inválidas.')
+    else:
+        form = CustomAuthenticationForm()
+    return render(request, 'news/login.html', {'form': form})
+
+@login_required
+def home(request):
+    return redirect('index')
+
+@login_required
 def index(request):
     return render(request, 'news/index.html')
 
+@login_required
 def fetch_news(request):
     global news_cache
     if request.method == 'POST':
@@ -33,15 +52,16 @@ def fetch_news(request):
         else:
             news_cache = scrape_dust2_news()
 
-        logging.info(f"Notícias coletadas: {len(news_cache)} itens")
         messages.success(request, 'Notícias capturadas com sucesso! Selecione as notícias para processar.')
         return redirect('list_news')
     else:
         return redirect('index')
 
+@login_required
 def list_news(request):
     return render(request, 'news/list_news.html', {'news': news_cache})
 
+@login_required
 def process_news(request):
     global news_cache
     if request.method == 'POST':
@@ -54,7 +74,6 @@ def process_news(request):
 
         for news in selected_news:
             if is_news_sent(news['guid']):
-                logging.info(f"Notícia '{news['title']}' já foi enviada para o Notion.")
                 continue
 
             news['content'] = get_news_content(news['link'])
@@ -68,6 +87,25 @@ def process_news(request):
     else:
         return redirect('index')
 
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def admin_view(request):
+    return render(request, 'news/admin.html')
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def register_view(request):
+    if request.method == 'POST':
+        form = RegisterForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Usuário cadastrado com sucesso! Você já pode fazer login.')
+            return redirect('login')
+    else:
+        form = RegisterForm()
+    return render(request, 'news/register.html', {'form': form})
+
+@login_required
 def settings(request):
     if request.method == 'POST':
         form = APISettingsForm(request.POST)
@@ -80,3 +118,6 @@ def settings(request):
         form = APISettingsForm(instance=settings)
     
     return render(request, 'news/settings.html', {'form': form})
+
+def custom_page_not_found_view(request, exception):
+    return redirect(settings.LOGIN_URL)

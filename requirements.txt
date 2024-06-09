@@ -4,3 +4,5 @@ feedparser
 notion-client
 python-dotenv
 google-generativeai
+gunicorn
+django

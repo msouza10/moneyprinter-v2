@@ -5,10 +5,10 @@ from scripts.scraping_hltv import main as scrape_hltv_news, get_news_content, us
 from scripts.scraping_dust2 import main as scrape_dust2_news
 from scripts.script_generation import generate_script
 from scripts.upload_to_notion import create_and_update_script
-from scripts.fetch_clips import fetch_cs2_clips  # Importar a nova função
+from scripts.twitch_clips import fetch_cs2_clips, search_games
 import os
 from dotenv import load_dotenv
-from scripts.database_helper import create_database, mark_news_as_sent, is_news_sent
+from scripts.database_helper import create_database, mark_news_as_sent, is_news_sent, add_used_game_id, get_used_game_ids
 from scripts.config import get_env_variable
 import logging
 from typing import Dict, List
@@ -39,13 +39,6 @@ def format_uuid(uuid: str) -> str:
     """Formata um UUID removendo hífens."""
     return uuid.replace("-", "")
 
-async def fetch_and_collect_clips(twitch, num_clips, min_duration, max_duration):  # Adicionar 'twitch' como argumento
-    clips = []
-    async for clip in twitch.get_clips(game_id=game_id, started_at=datetime.now() - timedelta(days=7), first=num_clips):
-        if min_duration <= clip['duration'] <= max_duration:
-            clips.append(clip)
-    return clips
-
 async def main():
     """Função principal do script."""
     logger.info("Iniciando a função main")
@@ -55,12 +48,20 @@ async def main():
     logger.info("Banco de dados verificado/criado")
 
     parser = argparse.ArgumentParser(description="Script para coletar notícias e criar scripts para Notion.")
-    parser.add_argument("--source", "--src", choices=["hltv", "dust2", "all"], required=True, help="Fonte das notícias: 'hltv', 'dust2' ou 'all'")
+    parser.add_argument("--source", "--src", choices=["hltv", "dust2", "all"], help="Fonte das notícias: 'hltv', 'dust2' ou 'all'")
     parser.add_argument("--process", "--proc", choices=["all"], help="Processar todas as notícias automaticamente")
-    parser.add_argument("--fetch-clips", action='store_true', help="Busca os clipes mais populares de CS2 na Twitch")  # Adicionar a opção --fetch-clips
+    parser.add_argument("--fetch-clips", action='store_true', help="Busca os clipes mais populares de CS2 na Twitch")
+    parser.add_argument("--game-id", type=str, help="ID do jogo na Twitch")
+    parser.add_argument("--period", choices=["day", "week", "month", "year", "all"], default="week", help="Período dos clipes: 'day', 'week', 'month', 'year', 'all'")
     parser.add_argument("--min-duration", type=int, default=40, help="Duração mínima dos clipes em segundos")
     parser.add_argument("--max-duration", type=int, default=90, help="Duração máxima dos clipes em segundos")
+    parser.add_argument("--search-game", type=str, help="Busca o ID de um jogo na Twitch")
+    parser.add_argument("--list-games", action='store_true', help="Lista os IDs de jogos usados anteriormente")
     args = parser.parse_args()
+
+    if not args.search_game and not args.source and not args.fetch_clips and not args.list_games:
+        parser.error("A opção --source/--src é obrigatória, a menos que --search-game, --list-games ou --fetch-clips seja usado.")
+
     logger.info(f"Argumentos recebidos: {args}")
 
     try:
@@ -73,12 +74,35 @@ async def main():
         token = get_env_variable("NOTION_TOKEN", "Digite seu token de integração do Notion: ") if not token else token
         database_id = format_uuid(get_env_variable("NOTION_DATABASE_ID", "Digite o ID da base de dados do Notion: ")) if not database_id else format_uuid(database_id)
 
+        if args.search_game:
+            client_id = os.getenv("TWITCH_CLIENT_ID")
+            client_secret = os.getenv("TWITCH_CLIENT_SECRET")
+            logger.info(f"Buscando ID do jogo: {args.search_game}")
+            games = await search_games(client_id, client_secret, args.search_game)
+            logger.info(f"Resultados da busca: {games}")
+            for game in games:
+                print(f"ID: {game['id']}, Nome: {game['name']}")
+                add_used_game_id(game['id'], game['name'])
+            return
+
+        if args.list_games:
+            used_game_ids = get_used_game_ids()
+            logger.info("Listando IDs de jogos usados anteriormente:")
+            for game in used_game_ids:
+                print(f"ID: {game['game_id']}, Nome: {game['game_name']}")
+            return
+
         if args.fetch_clips:
+            if not args.game_id:
+                raise ValueError("O ID do jogo deve ser fornecido para buscar clipes.")
+            client_id = os.getenv("TWITCH_CLIENT_ID")
+            client_secret = os.getenv("TWITCH_CLIENT_SECRET")
             logger.info("Iniciando a busca de clipes de CS2")
-            clips = await fetch_and_collect_clips(twitch, num_clips=10, min_duration=args.min_duration, max_duration=args.max_duration)            
+            clips = await fetch_cs2_clips(client_id, client_secret, args.game_id, period=args.period, num_clips=10, min_duration=args.min_duration, max_duration=args.max_duration)            
             logger.info(f"{len(clips)} clipes de CS2 coletados")
             for clip in clips:
                 logger.info(f"Clip: {clip['title']} - {clip['url']} - {clip['duration']}s")
+            return
 
         if args.source in ['hltv', 'all']:
             logger.info("Coletando notícias do HLTV")
@@ -517,7 +541,7 @@ SECRET_KEY = 'django-insecure-xb-l4b6@-cftf5c(xsy^uawdt#o&9%3490&y(gzhv)(qg4(dh_
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -723,6 +747,8 @@ def create_database(db_name: str = 'news_sent.db', db_dir: str = './databases'):
             cursor = conn.cursor()
             cursor.execute('''CREATE TABLE IF NOT EXISTS news_sent
                               (id INTEGER PRIMARY KEY, guid TEXT UNIQUE)''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS used_game_ids
+                              (id INTEGER PRIMARY KEY, game_id TEXT UNIQUE, game_name TEXT)''')
             conn.commit()
         logging.info(f"Banco de dados criado ou verificado com sucesso: {db_path}")
     except Exception as e:
@@ -755,49 +781,33 @@ def is_news_sent(guid: str, db_name: str = 'news_sent.db', db_dir: str = './data
         logging.error(f"Erro ao verificar se a notícia foi enviada: {e}")
         return False
 
---------------------------------------------------------------------------------
-
-Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\fetch_clips.py
-Content:
-from twitchAPI.twitch import Twitch
-from datetime import datetime, timedelta
-import logging
-import os
-import asyncio
-
-logging.basicConfig(level=logging.INFO)
-
-async def fetch_cs2_clips(num_clips: int = 10, min_duration: int = 40, max_duration: int = 90) -> list:
-    """Busca os clipes mais populares de CS2 na Twitch, filtrando por duração."""
-    logging.info("Iniciando a função fetch_cs2_clips")
-    twitch = await Twitch(os.getenv("TWITCH_CLIENT_ID"), os.getenv("TWITCH_CLIENT_SECRET"))
-    logging.info("Twitch client inicializado")
-    await twitch.authenticate_app([])
-    logging.info("Autenticação do app concluída")
-    game_data = await twitch.get_games(names=['Counter-Strike 2'])
-    logging.info(f"Dados do jogo obtidos: {game_data}")
-    game_id = game_data['data'][0]['id']
-    logging.info(f"ID do jogo CS2: {game_id}")
+def add_used_game_id(game_id: str, game_name: str, db_name: str = 'news_sent.db', db_dir: str = './databases'):
+    """Adiciona um ID de jogo usado ao banco de dados."""
+    db_path = os.path.join(db_dir, db_name)
     
-    clips = []
-    async for clip in twitch.get_clips(game_id=game_id, started_at=datetime.now() - timedelta(days=7), first=num_clips):
-        logging.info(f"Clip encontrado: {clip['title']} com duração de {clip['duration']} segundos")
-        if min_duration <= clip['duration'] <= max_duration:
-            clips.append(clip)
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("INSERT OR IGNORE INTO used_game_ids (game_id, game_name) VALUES (?, ?)", (game_id, game_name))
+            conn.commit()
+        logging.info(f"ID do jogo {game_id} ({game_name}) adicionado ao banco de dados.")
+    except Exception as e:
+        logging.error(f"Erro ao adicionar ID do jogo ao banco de dados: {e}")
+
+def get_used_game_ids(db_name: str = 'news_sent.db', db_dir: str = './databases') -> List[Dict[str, str]]:
+    """Obtém todos os IDs de jogos usados do banco de dados."""
+    db_path = os.path.join(db_dir, db_name)
     
-    logging.info(f"Total de clipes filtrados: {len(clips)}")
-    return clips
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT game_id, game_name FROM used_game_ids")
+            rows = cursor.fetchall()
+            return [{"game_id": row[0], "game_name": row[1]} for row in rows]
+    except Exception as e:
+        logging.error(f"Erro ao obter IDs de jogos usados do banco de dados: {e}")
+        return []
 
-async def main_fetch_clips():
-    logging.info("Iniciando a função main do fetch_clips.py")
-    clips = await fetch_cs2_clips()
-    logging.info(f"{len(clips)} clipes de CS2 coletados")
-    for clip in clips:
-        logging.info(f"Clip: {clip['title']} - {clip['url']} - {clip['duration']}s")
-
-if __name__ == "__main__":
-    logging.info("Executando o script fetch_clips.py diretamente")
-    asyncio.run(main_fetch_clips())
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\scraping_dust2.py
@@ -1073,6 +1083,81 @@ def generate_script(article: str) -> str:
     except Exception as e:
         logging.error(f"Erro ao gerar o script: {e}")
         return "Erro ao gerar o script."
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\twitch_clips.py
+Content:
+import aiohttp
+import logging
+import os
+from datetime import datetime, timedelta
+
+logging.basicConfig(level=logging.INFO)
+
+async def search_games(client_id, client_secret, game_name):
+    """Busca jogos na Twitch pelo nome."""
+    auth_url = 'https://id.twitch.tv/oauth2/token'
+    auth_params = {
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'grant_type': 'client_credentials'
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(auth_url, params=auth_params) as response:
+            auth_data = await response.json()
+            access_token = auth_data['access_token']
+    
+    search_url = 'https://api.twitch.tv/helix/games'
+    headers = {
+        'Client-ID': client_id,
+        'Authorization': f'Bearer {access_token}'
+    }
+    params = {
+        'name': game_name
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.get(search_url, headers=headers, params=params) as response:
+            data = await response.json()
+            return data['data']
+
+async def fetch_cs2_clips(client_id, client_secret, game_id, period='week', num_clips=10, min_duration=40, max_duration=90):
+    """Busca os clipes mais populares de um jogo na Twitch."""
+    auth_url = 'https://id.twitch.tv/oauth2/token'
+    auth_params = {
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'grant_type': 'client_credentials'
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(auth_url, params=auth_params) as response:
+            auth_data = await response.json()
+            access_token = auth_data['access_token']
+    
+    clips_url = 'https://api.twitch.tv/helix/clips'
+    headers = {
+        'Client-ID': client_id,
+        'Authorization': f'Bearer {access_token}'
+    }
+    params = {
+        'game_id': game_id,
+        'first': num_clips,
+        'started_at': (datetime.utcnow() - timedelta(days=7)).isoformat() + 'Z' if period == 'week' else None
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(clips_url, headers=headers, params=params) as response:
+            data = await response.json()
+            clips = []
+            for clip in data['data']:
+                duration = clip.get('duration')
+                if min_duration <= duration <= max_duration:
+                    clips.append({
+                        'title': clip['title'],
+                        'url': clip['url'],
+                        'duration': duration
+                    })
+            return clips
+
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\upload_to_notion.py

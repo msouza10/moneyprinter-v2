@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Administração</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'styles.css' %}">
+</head>
+<body>
+    <header>
+        <h1>Painel de Administração</h1>
+    </header>
+    <main>
+        <p>Bem-vindo ao painel de administração.</p>
+        <a href="{% url 'register' %}" class="button">Cadastrar Novo Usuário</a>
+    </main>
+</body>
+</html>
