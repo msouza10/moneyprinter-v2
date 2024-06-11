@@ -5,24 +5,32 @@
     <title>Login</title>
     {% load static %}
     <link rel="stylesheet" href="{% static 'styles.css' %}">
+    <link rel="stylesheet" href="{% static 'login.css' %}">
 </head>
 <body>
-    <header>
-        <h1>Login</h1>
-    </header>
-    <main>
-        <form method="post">
-            {% csrf_token %}
-            {{ form.as_p }}
-            <button type="submit">Login</button>
-        </form>
-        {% if messages %}
-        <ul>
-            {% for message in messages %}
-            <li>{{ message }}</li>
-            {% endfor %}
-        </ul>
-        {% endif %}
-    </main>
+    <div class="login-container">
+        <div class="login-form animate-fade-in">
+            <header>
+                <h1>Login</h1>
+            </header>
+            <main>
+                <form method="post">
+                    {% csrf_token %}
+                    {{ form.as_p }}
+                    <button type="submit">Login</button>
+                </form>
+                {% if messages %}
+                <ul class="messages">
+                    {% for message in messages %}
+                    <li>{{ message }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </main>
+            <footer>
+                <p>© 2024 Profit Portal</p>
+            </footer>
+        </div>
+    </div>
 </body>
 </html>

@@ -17,11 +17,13 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from django.conf.urls import handler404
+from django.contrib.auth.views import LogoutView
 from news import views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('news.urls')),
+    path('logout/', LogoutView.as_view(next_page='login'), name='logout'),  # Adicione esta linha
 ]
 
 handler404 = views.custom_page_not_found_view

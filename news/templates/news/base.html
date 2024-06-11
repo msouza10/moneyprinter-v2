@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}Profit Portal{% endblock %}</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'styles.css' %}">
+</head>
+<body class="animate-fade-in">
+    <header class="transparent-header animate-fade-in">
+        <div class="header-content">
+            <nav>
+                <ul>
+                    <li><a href="{% url 'index' %}" class="animate-fade-in">Home</a></li>
+                    <li><a href="{% url 'list_news' %}" class="animate-fade-in">Listar Notícias</a></li>
+                    <li><a href="{% url 'settings' %}" class="animate-fade-in">Configurações</a></li>
+                    {% if user.is_superuser %}
+                        <li><a href="{% url 'register' %}" class="animate-fade-in">Cadastrar Usuário</a></li>
+                    {% endif %}
+                    <li><a href="{% url 'logout' %}" class="animate-fade-in">Sair</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main class="animate-fade-in"> 
+        <div class="content-wrapper animate-fade-in">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+
+    <footer class="animate-fade-in">
+        <p>© 2024 Profit Portal</p>
+    </footer>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="{% static 'scripts.js' %}"></script>
+</body>
+</html>

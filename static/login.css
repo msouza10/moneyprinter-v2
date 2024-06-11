@@ -1,0 +1,78 @@
+body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-image: url("/static/images/nature-before-night-time.jpg"); 
+    background-size: cover;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    color: #333;
+}
+
+.login-container {
+    background: rgba(255, 255, 255, 0.13);
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    max-width: 400px;
+    width: 100%;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    animation: fadeIn 1.5s ease-in-out;
+}
+
+.login-form header h1 {
+    color: #333;
+    margin-bottom: 20px;
+}
+
+.login-form form {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.login-form form input {
+    width: 100%;
+    padding: 10px;
+    margin: 10px 0;
+    border: none;
+    border-radius: 5px;
+    font-size: 1rem;
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.login-form form button {
+    background: #667eea;
+    color: #fff;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.3s ease, transform 0.3s ease;
+}
+
+.login-form form button:hover {
+    background: #556cd6;
+    transform: scale(1.05);
+}
+
+.login-form .messages {
+    list-style: none;
+    padding: 0;
+    margin: 20px 0 0 0;
+}
+
+.login-form .messages li {
+    color: red;
+}
+
+@media (max-width: 500px) {
+    .login-container {
+        width: 90%;
+    }
+}

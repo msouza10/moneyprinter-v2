@@ -15,7 +15,7 @@ def capture_code_files_content(directory):
     script_path = os.path.abspath(__file__)
     for root, _, files in os.walk(directory):
         for file in files:
-            if file.endswith(('.py', '.html', '.css', '.js')):
+            if file.endswith(('.py', '.html', 'styles.css', 'scripts.js')):
                 file_path = os.path.join(root, file)
                 # Ignora o próprio script
                 if file_path != script_path:

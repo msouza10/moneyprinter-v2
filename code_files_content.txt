@@ -195,6 +195,8 @@ Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\forms.py
 Content:
 from django import forms
 from .models import APISettings
+from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
+from django.contrib.auth.models import User
 
 class APISettingsForm(forms.ModelForm):
     class Meta:
@@ -205,6 +207,21 @@ class APISettingsForm(forms.ModelForm):
             'notion_database_id': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
             'gemini_api_key': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
         }
+
+class CustomAuthenticationForm(AuthenticationForm):
+    username = forms.CharField(widget=forms.TextInput(attrs={'class': 'form-control'}))
+    password = forms.CharField(widget=forms.PasswordInput(attrs={'class': 'form-control'}))
+
+class RegisterForm(UserCreationForm):
+    class Meta:
+        model = User
+        fields = ['username', 'password1', 'password2']
+        widgets = {
+            'username': forms.TextInput(attrs={'class': 'form-control'}),
+            'password1': forms.PasswordInput(attrs={'class': 'form-control'}),
+            'password2': forms.PasswordInput(attrs={'class': 'form-control'}),
+        }
+    
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\models.py
@@ -234,7 +251,11 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    path('', views.index, name='index'),
+    path('', views.home, name='home'),
+    path('index/', views.index, name='index'),
+    path('login/', views.login_view, name='login'),
+    path('admin/', views.admin_view, name='admin'),
+    path('register/', views.register_view, name='register'),  # Adiciona a URL de registro
     path('fetch-news/', views.fetch_news, name='fetch_news'),
     path('list-news/', views.list_news, name='list_news'),
     path('process-news/', views.process_news, name='process_news'),
@@ -244,28 +265,47 @@ urlpatterns = [
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\views.py
 Content:
+from django.contrib.auth.decorators import login_required, user_passes_test
 from django.shortcuts import render, redirect
+from .forms import CustomAuthenticationForm, RegisterForm, APISettingsForm
 from django.contrib import messages
+from django.contrib.auth import authenticate, login
 from .models import APISettings
-from .forms import APISettingsForm
 from scripts.scraping_hltv import main as scrape_hltv_news, get_news_content, user_interaction
 from scripts.scraping_dust2 import main as scrape_dust2_news
 from scripts.script_generation import generate_script
 from scripts.upload_to_notion import create_and_update_script
-from scripts.config import get_env_variable
-from scripts.database_helper import create_database, mark_news_as_sent, is_news_sent
-import os
-from dotenv import load_dotenv
-import logging
-
-load_dotenv()
-create_database()
+from scripts.database_helper import mark_news_as_sent, is_news_sent
 
 news_cache = []
 
+def login_view(request):
+    if request.method == 'POST':
+        form = CustomAuthenticationForm(request, data=request.POST)
+        if form.is_valid():
+            username = form.cleaned_data.get('username')
+            password = form.cleaned_data.get('password')
+            user = authenticate(username=username, password=password)
+            if user is not None:
+                login(request, user)
+                return redirect('index')
+            else:
+                messages.error(request, 'Usuário ou senha incorretos.')
+        else:
+            messages.error(request, 'Informações inválidas.')
+    else:
+        form = CustomAuthenticationForm()
+    return render(request, 'news/login.html', {'form': form})
+
+@login_required
+def home(request):
+    return redirect('index')
+
+@login_required
 def index(request):
     return render(request, 'news/index.html')
 
+@login_required
 def fetch_news(request):
     global news_cache
     if request.method == 'POST':
@@ -279,15 +319,16 @@ def fetch_news(request):
         else:
             news_cache = scrape_dust2_news()
 
-        logging.info(f"Notícias coletadas: {len(news_cache)} itens")
         messages.success(request, 'Notícias capturadas com sucesso! Selecione as notícias para processar.')
         return redirect('list_news')
     else:
         return redirect('index')
 
+@login_required
 def list_news(request):
     return render(request, 'news/list_news.html', {'news': news_cache})
 
+@login_required
 def process_news(request):
     global news_cache
     if request.method == 'POST':
@@ -300,7 +341,6 @@ def process_news(request):
 
         for news in selected_news:
             if is_news_sent(news['guid']):
-                logging.info(f"Notícia '{news['title']}' já foi enviada para o Notion.")
                 continue
 
             news['content'] = get_news_content(news['link'])
@@ -314,6 +354,25 @@ def process_news(request):
     else:
         return redirect('index')
 
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def admin_view(request):
+    return render(request, 'news/admin.html')
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def register_view(request):
+    if request.method == 'POST':
+        form = RegisterForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Usuário cadastrado com sucesso! Você já pode fazer login.')
+            return redirect('login')
+    else:
+        form = RegisterForm()
+    return render(request, 'news/register.html', {'form': form})
+
+@login_required
 def settings(request):
     if request.method == 'POST':
         form = APISettingsForm(request.POST)
@@ -326,6 +385,9 @@ def settings(request):
         form = APISettingsForm(instance=settings)
     
     return render(request, 'news/settings.html', {'form': form})
+
+def custom_page_not_found_view(request, exception):
+    return redirect(settings.LOGIN_URL)
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\__init__.py
@@ -366,41 +428,63 @@ Content:
 
 --------------------------------------------------------------------------------
 
-Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\index.html
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\admin.html
 Content:
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Profit Portal</title>
+    <title>Administração</title>
     {% load static %}
     <link rel="stylesheet" href="{% static 'styles.css' %}">
 </head>
 <body>
     <header>
-        <h1>Profit Portal</h1>
-        <img src="{% static 'images/logo.png' %}" alt="Profit Portal Logo" class="logo">
-        <button id="dark-mode-toggle" aria-label="Toggle Dark Mode"><i class="fa-solid fa-sun"></i></button>
+        <h1>Painel de Administração</h1>
+    </header>
+    <main>
+        <p>Bem-vindo ao painel de administração.</p>
+        <a href="{% url 'register' %}" class="button">Cadastrar Novo Usuário</a>
+    </main>
+</body>
+</html>
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\base.html
+Content:
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}Profit Portal{% endblock %}</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'styles.css' %}">
+</head>
+<body class="animate-fade-in">
+    <header class="transparent-header animate-fade-in">
+        <div class="header-content">
+            <nav>
+                <ul>
+                    <li><a href="{% url 'index' %}" class="animate-fade-in">Home</a></li>
+                    <li><a href="{% url 'list_news' %}" class="animate-fade-in">Listar Notícias</a></li>
+                    <li><a href="{% url 'settings' %}" class="animate-fade-in">Configurações</a></li>
+                    {% if user.is_superuser %}
+                        <li><a href="{% url 'register' %}" class="animate-fade-in">Cadastrar Usuário</a></li>
+                    {% endif %}
+                    <li><a href="{% url 'logout' %}" class="animate-fade-in">Sair</a></li>
+                </ul>
+            </nav>
+        </div>
     </header>
 
-    <main>
-        <div class="content-wrapper">
-            <form method="POST" action="{% url 'fetch_news' %}">
-                {% csrf_token %}
-                <label for="source">Selecione a Fonte:</label>
-                <select name="source" id="source" aria-labelledby="source">
-                    <option value="hltv">HLTV</option>
-                    <option value="dust2">Dust2</option>
-                </select>
-                <button type="submit">Capturar Notícias</button>
-            </form>
-
-            <a href="{% url 'settings' %}" class="button">Configurações</a>
+    <main class="animate-fade-in"> 
+        <div class="content-wrapper animate-fade-in">
+            {% block content %}{% endblock %}
         </div>
     </main>
 
-    <footer>
+    <footer class="animate-fade-in">
         <p>© 2024 Profit Portal</p>
     </footer>
 
@@ -409,6 +493,29 @@ Content:
 </body>
 </html>
 
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\index.html
+Content:
+{% extends 'news/base.html' %}
+
+{% block content %}
+    <form method="POST" action="{% url 'fetch_news' %}">
+        {% csrf_token %}
+        <label for="source">Selecione a Fonte:</label>
+        <select name="source" id="source" aria-labelledby="source">
+            <option value="hltv">HLTV</option>
+            <option value="dust2">Dust2</option>
+        </select>
+        <button type="submit">Capturar Notícias</button>
+    </form>
+
+    <a href="{% url 'settings' %}" class="button">Configurações</a>
+
+    {% if user.is_superuser %}
+        <a href="{% url 'register' %}" class="button">Cadastrar Novo Usuário</a>
+    {% endif %}
+{% endblock %}
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\list_news.html
@@ -457,38 +564,121 @@ Content:
 
 --------------------------------------------------------------------------------
 
-Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\settings.html
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\login.html
 Content:
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Profit Portal - Settings</title>
+    <title>Login</title>
     {% load static %}
     <link rel="stylesheet" href="{% static 'styles.css' %}">
+    <link rel="stylesheet" href="{% static 'login.css' %}">
 </head>
 <body>
-    <header>
-        <img src="{% static 'images/logo.png' %}" alt="Logo" class="logo">
-        <h1>Configurações de API</h1>
-        <button id="dark-mode-toggle" aria-label="Toggle Dark Mode"><i class="fa-solid fa-sun"></i></button>
-    </header>
-    <main>
-        <div class="content-wrapper">
-            <form method="post" action="{% url 'settings' %}">
-                {% csrf_token %}
-                {{ form.as_p }}
-                <button type="submit">Salvar Configurações</button>
-            </form>
-            <a href="{% url 'index' %}" class="button">Voltar para Home</a>
+    <div class="login-container">
+        <div class="login-form animate-fade-in">
+            <header>
+                <h1>Login</h1>
+            </header>
+            <main>
+                <form method="post">
+                    {% csrf_token %}
+                    {{ form.as_p }}
+                    <button type="submit">Login</button>
+                </form>
+                {% if messages %}
+                <ul class="messages">
+                    {% for message in messages %}
+                    <li>{{ message }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </main>
+            <footer>
+                <p>© 2024 Profit Portal</p>
+            </footer>
         </div>
-    </main>
-
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="{% static 'scripts.js' %}"></script>
+    </div>
 </body>
 </html>
 
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\register.html
+Content:
+{% extends 'news/base.html' %}
+
+{% block title %}Cadastro de Usuário{% endblock %}
+
+{% block content %}
+    <h2>Cadastro de Usuário</h2>
+
+    <form method="post" class="register-form">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="{{ form.username.id_for_label }}">{{ form.username.label }}</label>
+            {{ form.username }}
+            {% if form.username.errors %}
+                <ul class="errorlist">
+                    {% for error in form.username.errors %}
+                        <li>{{ error }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </div>
+        <div class="form-group">
+            <label for="{{ form.password1.id_for_label }}">{{ form.password1.label }}</label>
+            {{ form.password1 }}
+            {% if form.password1.errors %}
+                <ul class="errorlist">
+                    {% for error in form.password1.errors %}
+                        <li>{{ error }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </div>
+        <div class="form-group">
+            <label for="{{ form.password2.id_for_label }}">{{ form.password2.label }}</label>
+            {{ form.password2 }}
+            {% if form.password2.errors %}
+                <ul class="errorlist">
+                    {% for error in form.password2.errors %}
+                        <li>{{ error }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </div>
+        <button type="submit" class="button">Cadastrar</button>
+    </form>
+
+    {% if messages %}
+        <ul class="messagelist">
+            {% for message in messages %}
+                <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+{% endblock %}
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\settings.html
+Content:
+{% extends 'news/base.html' %}
+
+{% block title %}Profit Portal - Configurações{% endblock %}
+
+{% block content %}
+    <h2>Configurações de API</h2>
+
+    <form method="post" action="{% url 'settings' %}">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit">Salvar Configurações</button>
+    </form>
+
+    <a href="{% url 'index' %}" class="button">Voltar para Home</a>
+{% endblock %}
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\ProfitPortal\asgi.py
@@ -526,6 +716,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -634,11 +825,16 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+LOGIN_URL = 'login'
+LOGIN_REDIRECT_URL = 'index'
+LOGOUT_REDIRECT_URL = 'login'
 
 --------------------------------------------------------------------------------
 
@@ -662,12 +858,17 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.conf.urls import handler404
+from django.contrib.auth.views import LogoutView
+from news import views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('news.urls')),
+    path('logout/', LogoutView.as_view(next_page='login'), name='logout'),  # Adicione esta linha
 ]
 
+handler404 = views.custom_page_not_found_view
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\ProfitPortal\wsgi.py
@@ -1309,6 +1510,26 @@ body {
     min-height: 100vh;
     text-align: center;
     transition: background-color 0.5s, color 0.5s;
+    background-image: url("/static/images/nature-before-night-time.jpg"); /* Substitua pelo caminho da sua imagem */
+    background-size: cover;
+    background-position: center;
+    color: #333;
+    padding-top: 80px; /* Ajuste este valor de acordo com a altura do seu cabeçalho */ 
+}
+
+.animate-fade-in {
+  animation: fadeIn 1.5s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+      opacity: 0;
+      transform: translateY(-20px);
+  }
+  to {
+      opacity: 1;
+      transform: translateY(0);
+  }
 }
 
 body.light-mode {
@@ -1316,9 +1537,9 @@ body.light-mode {
     color: #000000;
 }
 
-header, main, footer {
+header, footer { /* Remova 'main' daqui */
     width: 100%;
-    max-width: 1200px;
+    max-width: 12000px;
     padding: 20px;
     box-sizing: border-box;
     display: flex;
@@ -1327,174 +1548,252 @@ header, main, footer {
 }
 
 h1 {
-    color: #1DB954;
-    font-size: 3rem;
-    margin-bottom: 20px;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+color: #1DB954;
+font-size: 3rem;
+margin-bottom: 20px;
+text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .content-wrapper {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    background-color: #1C1C1C;
-    padding: 20px;
-    border-radius: 10px;
+display: flex;
+flex-direction: column;
+align-items: center;
+background-color: #dbdbdb0d;
+padding: 20px;
+border-radius: 10px;
 }
 
 form {
-    margin-bottom: 20px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
+margin-bottom: 20px;
+display: flex;
+flex-direction: column;
+align-items: center;
 }
 
-label, select, input[type="text"], input[type="password"], button {
-    margin: 10px 0;
-    padding: 10px;
-    font-size: 1rem;
-    border: none;
-    border-radius: 5px;
-    width: 100%;
-    max-width: 300px;
+label,
+select,
+input[type="text"],
+input[type="password"],
+button {
+margin: 10px 0;
+padding: 10px;
+font-size: 1rem;
+border: none;
+border-radius: 5px;
+width: 100%;
+max-width: 300px;
 }
 
-select, input[type="text"], input[type="password"] {
-    background-color: #282828;
-    color: #FFFFFF;
-    border: 3px solid #00000052;
+select,
+input[type="text"],
+input[type="password"] {
+background-color: #dbdbdb36;
+color: #FFFFFF;
+border: 3px solid #00000052;
 }
 
-body.light-mode select, body.light-mode input[type="text"], body.light-mode input[type="password"] {
-    background-color: #FFFFFF;
-    color: #000000;
-    border: 1px solid #ddd;
+body.light-mode select,
+body.light-mode input[type="text"],
+body.light-mode input[type="password"] {
+background-color: #FFFFFF;
+color: #000000;
+border: 1px solid #ddd;
 }
 
 button {
-    background-color: #1DB954;
-    color: #FFFFFF;
-    border: none;
-    cursor: pointer;
-    transition: background-color 0.3s ease, transform 0.3s ease;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+background-color: #1DB954;
+color: #FFFFFF;
+border: none;
+cursor: pointer;
+transition: background-color 0.3s ease, transform 0.3s ease;
+box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
 button:hover {
-    background-color: #1AA34A;
-    transform: scale(1.05);
+background-color: #1AA34A;
+transform: scale(1.05);
 }
 
 ul {
-    list-style-type: none;
-    padding: 0;
+list-style-type: none;
+padding: 0;
 }
 
 li {
-    padding: 10px;
-    background: #282828;
-    margin-bottom: 5px;
-    border: 1px solid #1DB954;
-    border-radius: 5px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+padding: 10px;
+background: #ffffff00;
+margin-bottom: 5px;
+border: none;
+border-radius: 5px;
+box-shadow: 0 2px 4px rgba(0, 0, 0, 0);
 }
 
-li input[type="checkbox"]:checked + label {
-    background-color: #1DB954;
-    color: #121212;
+li input[type="checkbox"]:checked+label {
+background-color: #1DB954;
+color: #121212;
 }
 
 body.light-mode li {
-    background: #FFFFFF;
-    color: #000000;
-    border: 1px solid #ddd;
+background: #FFFFFF;
+color: #000000;
+border: 1px solid #ddd;
 }
 
 .logo {
-    width: 200px;
-    height: auto;
-    margin-bottom: 20px;
-    animation: fadeIn 2s ease-in-out;
+width: 50px;
+height: auto;
+margin-bottom: 20px;
+animation: fadeIn 2s ease-in-out;
 }
 
 #dark-mode-toggle {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 24px;
-    color: #1DB954;
-    margin-top: 20px;
-    box-shadow: none; /* Remover sombra */
-    transition: color 0.3s ease, transform 0.3s ease; /* Adiciona transição para cor e transformação */
+background: none;
+border: none;
+cursor: pointer;
+font-size: 24px;
+color: #1DB954;
+margin-top: 20px;
+box-shadow: none;
+/* Remover sombra */
+transition: color 0.3s ease, transform 0.3s ease;
+/* Adiciona transição para cor e transformação */
 }
 
 body.light-mode #dark-mode-toggle {
-    color: #000000;
+color: #000000;
 }
 
 #dark-mode-toggle:hover {
-    transform: scale(1.05); /* Adiciona transformação ao passar o mouse */
+transform: scale(1.05);
+/* Adiciona transformação ao passar o mouse */
 }
 
 @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+from {
+  opacity: 0;
+}
+
+to {
+  opacity: 1;
+}
 }
 
 @media (max-width: 768px) {
-    header, main, footer {
-        padding: 10px;
-    }
 
-    h1 {
-        font-size: 2.5rem;
-    }
+header,
+main,
+footer {
+  padding: 10px;
+}
 
-    form {
-        width: 90%;
-    }
+h1 {
+  font-size: 2.5rem;
+}
 
-    .logo {
-        width: 150px;
-    }
+form {
+  width: 90%;
+}
+
+.logo {
+  width: 150px;
+}
 }
 
 .custom-textbox {
-    width: 300px;
-    padding: 10px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 16px;
-    transition: border-color 0.3s, box-shadow 0.3s;
+width: 300px;
+padding: 10px;
+border: 1px solid #ccc;
+border-radius: 4px;
+font-size: 16px;
+transition: border-color 0.3s, box-shadow 0.3s;
 }
 
 .custom-textbox:focus {
-    border-color: #1DB954;  /* Mudar a cor da borda para verde */
-    box-shadow: 0 0 5px rgba(29, 185, 84, 0.5);  /* Ajustar a sombra */
-    outline: none;
+border-color: #1DB954;
+/* Mudar a cor da borda para verde */
+box-shadow: 0 0 5px rgba(29, 185, 84, 0.5);
+/* Ajustar a sombra */
+outline: none;
 }
 
 .custom-textbox::placeholder {
-    color: #888;
-    font-style: italic;
+color: #888;
+font-style: italic;
 }
 
 .button {
-    background-color: #b93f1d;
-    color: #FFFFFF;
-    padding: 10px 20px;
-    border-radius: 5px;
-    text-decoration: none;
-    display: inline-block;
-    margin-top: 10px;
-    transition: background-color 0.3s ease, transform 0.3s ease;
+background-color: #b93f1d;
+color: #FFFFFF;
+padding: 10px 20px;
+border-radius: 5px;
+text-decoration: none;
+display: inline-block;
+margin-top: 10px;
+transition: background-color 0.3s ease, transform 0.3s ease;
 }
 
 .button:hover {
-    background-color: #a32f1a;
-    transform: scale(1.05);
+background-color: #a32f1a;
+transform: scale(1.05);
 }
 
+.transparent-header {
+position: fixed;
+top: 0;
+left: 0;
+width: 100%;
+background-color: transparent;
+/* Torna o fundo transparente */
+padding: 20px;
+z-index: 100;
+backdrop-filter: blur(5px);
+/* Adiciona um efeito de blur ao fundo */
+}
+
+.header-content {
+display: flex;
+justify-content: space-between;
+align-items: center;
+max-width: 1200px;
+margin: 0 auto;
+}
+
+.transparent-header h1 {
+color: white;
+/* Cor do título */
+margin: 0;
+font-size: 1.8em;
+}
+
+.transparent-header nav ul {
+list-style: none;
+margin: 0;
+padding: 0;
+display: flex;
+}
+
+.transparent-header nav li {
+margin-left: 30px;
+}
+
+.transparent-header nav a {
+text-decoration: none;
+color: white;
+background-color: transparent;
+border: none;
+padding: 10px 20px;
+/* Adiciona uma transição suave na cor do link */
+}
+
+.transparent-header nav a:hover {
+color: #ddd0;
+/* Cor do link quando o mouse passa por cima */
+}
+
+/* Ajuste para o main */
+main {
+padding-top: 80px; /* Ajuste este valor de acordo com a altura do seu cabeçalho */
+}
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\tests\test_config.py

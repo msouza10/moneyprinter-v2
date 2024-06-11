@@ -1,40 +1,19 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Profit Portal</title>
-    {% load static %}
-    <link rel="stylesheet" href="{% static 'styles.css' %}">
-</head>
-<body>
-    <header>
-        <h1>Profit Portal</h1>
-        <img src="{% static 'images/logo.png' %}" alt="Profit Portal Logo" class="logo">
-        <button id="dark-mode-toggle" aria-label="Toggle Dark Mode"><i class="fa-solid fa-sun"></i></button>
-    </header>
+{% extends 'news/base.html' %}
 
-    <main>
-        <div class="content-wrapper">
-            <form method="POST" action="{% url 'fetch_news' %}">
-                {% csrf_token %}
-                <label for="source">Selecione a Fonte:</label>
-                <select name="source" id="source" aria-labelledby="source">
-                    <option value="hltv">HLTV</option>
-                    <option value="dust2">Dust2</option>
-                </select>
-                <button type="submit">Capturar Notícias</button>
-            </form>
+{% block content %}
+    <form method="POST" action="{% url 'fetch_news' %}">
+        {% csrf_token %}
+        <label for="source">Selecione a Fonte:</label>
+        <select name="source" id="source" aria-labelledby="source">
+            <option value="hltv">HLTV</option>
+            <option value="dust2">Dust2</option>
+        </select>
+        <button type="submit">Capturar Notícias</button>
+    </form>
 
-            <a href="{% url 'settings' %}" class="button">Configurações</a>
-        </div>
-    </main>
+    <a href="{% url 'settings' %}" class="button">Configurações</a>
 
-    <footer>
-        <p>© 2024 Profit Portal</p>
-    </footer>
-
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="{% static 'scripts.js' %}"></script>
-</body>
-</html>
+    {% if user.is_superuser %}
+        <a href="{% url 'register' %}" class="button">Cadastrar Novo Usuário</a>
+    {% endif %}
+{% endblock %}

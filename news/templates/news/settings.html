@@ -1,29 +1,15 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Profit Portal - Settings</title>
-    {% load static %}
-    <link rel="stylesheet" href="{% static 'styles.css' %}">
-</head>
-<body>
-    <header>
-        <img src="{% static 'images/logo.png' %}" alt="Logo" class="logo">
-        <h1>Configurações de API</h1>
-        <button id="dark-mode-toggle" aria-label="Toggle Dark Mode"><i class="fa-solid fa-sun"></i></button>
-    </header>
-    <main>
-        <div class="content-wrapper">
-            <form method="post" action="{% url 'settings' %}">
-                {% csrf_token %}
-                {{ form.as_p }}
-                <button type="submit">Salvar Configurações</button>
-            </form>
-            <a href="{% url 'index' %}" class="button">Voltar para Home</a>
-        </div>
-    </main>
+{% extends 'news/base.html' %}
 
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="{% static 'scripts.js' %}"></script>
-</body>
-</html>
+{% block title %}Profit Portal - Configurações{% endblock %}
+
+{% block content %}
+    <h2>Configurações de API</h2>
+
+    <form method="post" action="{% url 'settings' %}">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit">Salvar Configurações</button>
+    </form>
+
+    <a href="{% url 'index' %}" class="button">Voltar para Home</a>
+{% endblock %}
