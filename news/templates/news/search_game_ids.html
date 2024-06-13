@@ -1,0 +1,26 @@
+{% extends 'news/base.html' %}
+
+{% block title %}Buscar IDs de Jogos{% endblock %}
+
+{% block content %}
+    <h2>Buscar IDs de Jogos</h2>
+    <form method="POST" action="{% url 'search_game_ids' %}">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="game_name">Nome do Jogo:</label>
+            <input type="text" name="game_name" id="game_name" class="form-control" required>
+        </div>
+        <button type="submit" class="button">Buscar</button>
+    </form>
+
+    {% if searched %}
+        <h3>Resultados da Busca</h3>
+        <ul>
+            {% for game in games %}
+            <li>ID: {{ game.id }}, Nome: {{ game.name }}</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+
+    <a href="{% url 'index' %}" class="button">Voltar para Home</a>
+{% endblock %}

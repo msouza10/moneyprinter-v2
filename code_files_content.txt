@@ -5,7 +5,7 @@ from scripts.scraping_hltv import main as scrape_hltv_news, get_news_content, us
 from scripts.scraping_dust2 import main as scrape_dust2_news
 from scripts.script_generation import generate_script
 from scripts.upload_to_notion import create_and_update_script
-from scripts.twitch_clips import fetch_cs2_clips, search_games
+from scripts.twitch_clips import fetch_cs2_clips, search_games, fetch_and_download_top_clip, download_clip
 import os
 from dotenv import load_dotenv
 from scripts.database_helper import create_database, mark_news_as_sent, is_news_sent, add_used_game_id, get_used_game_ids
@@ -13,6 +13,7 @@ from scripts.config import get_env_variable
 import logging
 from typing import Dict, List
 import asyncio
+from datetime import datetime, timedelta
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -39,6 +40,23 @@ def format_uuid(uuid: str) -> str:
     """Formata um UUID removendo hífens."""
     return uuid.replace("-", "")
 
+def get_started_at(period: str) -> str:
+    """Retorna a data de início baseada no período."""
+    now = datetime.utcnow()
+    if period == "day":
+        start = now - timedelta(days=1)
+    elif period == "week":
+        start = now - timedelta(weeks=1)
+    elif period == "month":
+        start = now - timedelta(days=30)
+    elif period == "year":
+        start = now - timedelta(days=365)
+    elif period == "all":
+        return None
+    else:
+        raise ValueError("Período inválido.")
+    return start.isoformat() + 'Z'
+
 async def main():
     """Função principal do script."""
     logger.info("Iniciando a função main")
@@ -51,16 +69,17 @@ async def main():
     parser.add_argument("--source", "--src", choices=["hltv", "dust2", "all"], help="Fonte das notícias: 'hltv', 'dust2' ou 'all'")
     parser.add_argument("--process", "--proc", choices=["all"], help="Processar todas as notícias automaticamente")
     parser.add_argument("--fetch-clips", action='store_true', help="Busca os clipes mais populares de CS2 na Twitch")
+    parser.add_argument("--fetch-top-clip", action='store_true', help="Busca e baixa o clipe mais famoso de CS2 na Twitch")
     parser.add_argument("--game-id", type=str, help="ID do jogo na Twitch")
-    parser.add_argument("--period", choices=["day", "week", "month", "year", "all"], default="week", help="Período dos clipes: 'day', 'week', 'month', 'year', 'all'")
+    parser.add_argument("--period", choices=["day", "week", "month", "year", "all"], default="week", help="Período dos clipes: 'day', 'week', 'month', 'year'")
     parser.add_argument("--min-duration", type=int, default=40, help="Duração mínima dos clipes em segundos")
     parser.add_argument("--max-duration", type=int, default=90, help="Duração máxima dos clipes em segundos")
     parser.add_argument("--search-game", type=str, help="Busca o ID de um jogo na Twitch")
     parser.add_argument("--list-games", action='store_true', help="Lista os IDs de jogos usados anteriormente")
     args = parser.parse_args()
 
-    if not args.search_game and not args.source and not args.fetch_clips and not args.list_games:
-        parser.error("A opção --source/--src é obrigatória, a menos que --search-game, --list-games ou --fetch-clips seja usado.")
+    if not args.search_game and not args.source and not args.fetch_clips and not args.fetch_top_clip and not args.list_games:
+        parser.error("A opção --source/--src é obrigatória, a menos que --search-game, --list-games, --fetch-clips ou --fetch-top-clip seja usado.")
 
     logger.info(f"Argumentos recebidos: {args}")
 
@@ -74,9 +93,10 @@ async def main():
         token = get_env_variable("NOTION_TOKEN", "Digite seu token de integração do Notion: ") if not token else token
         database_id = format_uuid(get_env_variable("NOTION_DATABASE_ID", "Digite o ID da base de dados do Notion: ")) if not database_id else format_uuid(database_id)
 
+        client_id = os.getenv("TWITCH_CLIENT_ID")
+        client_secret = os.getenv("TWITCH_CLIENT_SECRET")
+
         if args.search_game:
-            client_id = os.getenv("TWITCH_CLIENT_ID")
-            client_secret = os.getenv("TWITCH_CLIENT_SECRET")
             logger.info(f"Buscando ID do jogo: {args.search_game}")
             games = await search_games(client_id, client_secret, args.search_game)
             logger.info(f"Resultados da busca: {games}")
@@ -95,13 +115,34 @@ async def main():
         if args.fetch_clips:
             if not args.game_id:
                 raise ValueError("O ID do jogo deve ser fornecido para buscar clipes.")
-            client_id = os.getenv("TWITCH_CLIENT_ID")
-            client_secret = os.getenv("TWITCH_CLIENT_SECRET")
+            started_at = get_started_at(args.period)
             logger.info("Iniciando a busca de clipes de CS2")
-            clips = await fetch_cs2_clips(client_id, client_secret, args.game_id, period=args.period, num_clips=10, min_duration=args.min_duration, max_duration=args.max_duration)            
+            clips = await fetch_cs2_clips(client_id, client_secret, args.game_id, period=args.period, num_clips=10, min_duration=args.min_duration, max_duration=args.max_duration, started_at=started_at)
             logger.info(f"{len(clips)} clipes de CS2 coletados")
-            for clip in clips:
-                logger.info(f"Clip: {clip['title']} - {clip['url']} - {clip['duration']}s")
+            for i, clip in enumerate(clips, start=1):
+                logger.info(f"Clip {i}: {clip['title']} - {clip['url']} - {clip['duration']}s - {clip['view_count']} views")
+                print(f"{i}. {clip['title']} - {clip['url']} - {clip['duration']}s - {clip['view_count']} views")
+            download_choice = input("Digite o número do clipe que deseja baixar ou 'all' para baixar todos: ")
+            if download_choice.lower() == 'all':
+                for clip in clips:
+                    await download_clip(clip['id'], clip['title'], client_id, client_secret)
+            else:
+                try:
+                    selected_index = int(download_choice) - 1
+                    if 0 <= selected_index < len(clips):
+                        selected_clip = clips[selected_index]
+                        await download_clip(selected_clip['id'], selected_clip['title'], client_id, client_secret)
+                    else:
+                        logger.error("Número do clipe inválido.")
+                except ValueError:
+                    logger.error("Entrada inválida.")
+            return
+
+        if args.fetch_top_clip:
+            if not args.game_id:
+                raise ValueError("O ID do jogo deve ser fornecido para buscar clipes.")
+            logger.info("Iniciando a busca do clipe mais famoso de CS2")
+            await fetch_and_download_top_clip(client_id, client_secret, args.game_id, period=args.period, min_duration=args.min_duration, max_duration=args.max_duration)
             return
 
         if args.source in ['hltv', 'all']:
@@ -142,7 +183,6 @@ def process_news(news_data, token, database_id, process_all=False):
 if __name__ == "__main__":
     logger.info("Executando o script principal diretamente")
     asyncio.run(main())
-
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\manage.py
@@ -201,11 +241,13 @@ from django.contrib.auth.models import User
 class APISettingsForm(forms.ModelForm):
     class Meta:
         model = APISettings
-        fields = ['notion_token', 'notion_database_id', 'gemini_api_key']
+        fields = ['notion_token', 'notion_database_id', 'gemini_api_key', 'twitch_client_id', 'twitch_client_secret']
         widgets = {
             'notion_token': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
             'notion_database_id': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
             'gemini_api_key': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
+            'twitch_client_id': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
+            'twitch_client_secret': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
         }
 
 class CustomAuthenticationForm(AuthenticationForm):
@@ -221,7 +263,7 @@ class RegisterForm(UserCreationForm):
             'password1': forms.PasswordInput(attrs={'class': 'form-control'}),
             'password2': forms.PasswordInput(attrs={'class': 'form-control'}),
         }
-    
+
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\models.py
@@ -232,9 +274,12 @@ class APISettings(models.Model):
     notion_token = models.CharField(max_length=255, blank=True, null=True)
     notion_database_id = models.CharField(max_length=255, blank=True, null=True)
     gemini_api_key = models.CharField(max_length=255, blank=True, null=True)
+    twitch_client_id = models.CharField(max_length=255, blank=True, null=True)
+    twitch_client_secret = models.CharField(max_length=255, blank=True, null=True)
 
     def __str__(self):
         return "API Settings"
+
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\tests.py
@@ -255,11 +300,17 @@ urlpatterns = [
     path('index/', views.index, name='index'),
     path('login/', views.login_view, name='login'),
     path('admin/', views.admin_view, name='admin'),
-    path('register/', views.register_view, name='register'),  # Adiciona a URL de registro
+    path('register/', views.register_view, name='register'),
     path('fetch-news/', views.fetch_news, name='fetch_news'),
     path('list-news/', views.list_news, name='list_news'),
     path('process-news/', views.process_news, name='process_news'),
     path('settings/', views.settings, name='settings'),
+    path('select-clips/', views.select_clips, name='select_clips'),
+    path('fetch-clips/', views.fetch_clips, name='fetch_clips'),
+    path('list-clips/', views.list_clips, name='list_clips'),
+    path('download-clip/<str:clip_id>/', views.download_clip_view, name='download_clip'),
+    path('list-game-ids/', views.list_game_ids, name='list_game_ids'),
+    path('search-game-ids/', views.search_game_ids, name='search_game_ids'),
 ]
 --------------------------------------------------------------------------------
 
@@ -267,17 +318,26 @@ Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\views.py
 Content:
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.shortcuts import render, redirect
+from django.conf import settings
 from .forms import CustomAuthenticationForm, RegisterForm, APISettingsForm
 from django.contrib import messages
 from django.contrib.auth import authenticate, login
+from django.http import FileResponse, Http404
 from .models import APISettings
 from scripts.scraping_hltv import main as scrape_hltv_news, get_news_content, user_interaction
 from scripts.scraping_dust2 import main as scrape_dust2_news
 from scripts.script_generation import generate_script
 from scripts.upload_to_notion import create_and_update_script
-from scripts.database_helper import mark_news_as_sent, is_news_sent
+from scripts.database_helper import mark_news_as_sent, is_news_sent, add_used_game_id, get_used_game_ids
+from scripts.twitch_clips import fetch_cs2_clips, search_games, download_clip_async, fetch_clip_download_url
+import logging
+import os
+import asyncio
+import aiofiles
+import aiohttp
 
 news_cache = []
+clips_cache = []
 
 def login_view(request):
     if request.method == 'POST':
@@ -375,7 +435,7 @@ def register_view(request):
 @login_required
 def settings(request):
     if request.method == 'POST':
-        form = APISettingsForm(request.POST)
+        form = APISettingsForm(request.POST, instance=APISettings.objects.first())
         if form.is_valid():
             form.save()
             messages.success(request, 'Configurações salvas com sucesso!')
@@ -386,8 +446,128 @@ def settings(request):
     
     return render(request, 'news/settings.html', {'form': form})
 
+@login_required
 def custom_page_not_found_view(request, exception):
     return redirect(settings.LOGIN_URL)
+
+@login_required
+def fetch_clips(request):
+    global clips_cache
+    if request.method == 'POST':
+        game_id = request.POST.get('game_id')
+        period = request.POST.get('period')
+        min_duration = int(request.POST.get('min_duration', 40))
+        max_duration = int(request.POST.get('max_duration', 90))
+        
+        settings = APISettings.objects.first()
+        client_id = settings.twitch_client_id
+        client_secret = settings.twitch_client_secret
+
+        if not client_id or not client_secret:
+            messages.error(request, 'As configurações da API da Twitch não estão definidas. Por favor, configure-as nas configurações.')
+            return redirect('settings')
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        clips_cache = loop.run_until_complete(fetch_cs2_clips(client_id, client_secret, game_id, period=period, num_clips=10, min_duration=min_duration, max_duration=max_duration))
+        
+        # Add the URL for embedding each clip
+        for clip in clips_cache:
+            clip['embed_url'] = f"https://clips.twitch.tv/embed?clip={clip['id']}&parent=localhost"
+        
+        # Store clips_cache in session
+        request.session['clips_cache'] = clips_cache
+
+        messages.success(request, 'Clipes capturados com sucesso!')
+        return redirect('list_clips')
+    return redirect('index')
+
+@login_required
+def list_clips(request):
+    clips_cache = request.session.get('clips_cache', [])
+    return render(request, 'news/list_clips.html', {'clips': clips_cache})
+
+@login_required
+def list_clips(request):
+    return render(request, 'news/list_clips.html', {'clips': clips_cache})
+
+@login_required
+def list_game_ids(request):
+    used_game_ids = get_used_game_ids()
+    return render(request, 'news/list_game_ids.html', {'game_ids': used_game_ids})
+
+@login_required
+def search_game_ids(request):
+    if request.method == 'POST':
+        game_name = request.POST.get('game_name')
+        settings = APISettings.objects.first()
+        client_id = settings.twitch_client_id
+        client_secret = settings.twitch_client_secret
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        games = loop.run_until_complete(search_games(client_id, client_secret, game_name))
+        
+        return render(request, 'news/search_game_ids.html', {'games': games, 'searched': True})
+    return render(request, 'news/search_game_ids.html', {'searched': False})
+
+@login_required
+def select_clips(request):
+    return render(request, 'news/select_clips.html')
+
+async def download_clip_async(clip_id, clip_title, client_id, client_secret):
+    """Baixa um clipe da Twitch usando o ID do clipe."""
+    download_url = await fetch_clip_download_url(clip_id, client_id, client_secret)
+    if not download_url:
+        logging.error("URL de download não encontrada.")
+        return None
+
+    clips_dir = 'clips'
+    os.makedirs(clips_dir, exist_ok=True)
+    file_path = os.path.join(clips_dir, f"{clip_title}.mp4")
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(download_url) as response:
+            if response.status == 200:
+                async with aiofiles.open(file_path, "wb") as file:
+                    while True:
+                        chunk = await response.content.read(1024)
+                        if not chunk:
+                            break
+                        await file.write(chunk)
+                logging.info(f"Clip '{clip_title}' baixado com sucesso em '{file_path}'.")
+                return file_path
+            else:
+                logging.error(f"Erro ao baixar o clipe: Status {response.status}")
+                return None
+
+@login_required
+def download_clip_view(request, clip_id):
+    # Fetch Twitch credentials
+    settings_instance = APISettings.objects.first()
+    client_id = settings_instance.twitch_client_id
+    client_secret = settings_instance.twitch_client_secret
+
+    if not client_id or not client_secret:
+        raise Http404("Credenciais da Twitch não encontradas nas configurações.")
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    # Fetching clip details from the session cache
+    clips_cache = request.session.get('clips_cache', [])
+    clip = next((clip for clip in clips_cache if clip['id'] == clip_id), None)
+
+    if not clip:
+        raise Http404("Clip não encontrado")
+
+    file_path = loop.run_until_complete(download_clip_async(clip_id, clip['title'], client_id, client_secret))
+
+    if file_path and os.path.exists(file_path):
+        response = FileResponse(open(file_path, 'rb'), as_attachment=True, filename=os.path.basename(file_path))
+        return response
+    else:
+        raise Http404("Clip não encontrado")
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\__init__.py
@@ -418,6 +598,34 @@ class Migration(migrations.Migration):
                 ('notion_database_id', models.CharField(blank=True, max_length=255, null=True)),
                 ('gemini_api_key', models.CharField(blank=True, max_length=255, null=True)),
             ],
+        ),
+    ]
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\migrations\0002_apisettings_twitch_client_id_and_more.py
+Content:
+# Generated by Django 5.0.6 on 2024-06-12 20:35
+
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('news', '0001_initial'),
+    ]
+
+    operations = [
+        migrations.AddField(
+            model_name='apisettings',
+            name='twitch_client_id',
+            field=models.CharField(blank=True, max_length=255, null=True),
+        ),
+        migrations.AddField(
+            model_name='apisettings',
+            name='twitch_client_secret',
+            field=models.CharField(blank=True, max_length=255, null=True),
         ),
     ]
 
@@ -510,11 +718,77 @@ Content:
         <button type="submit">Capturar Notícias</button>
     </form>
 
+    <a href="{% url 'select_clips' %}" class="button">Buscar Clipes de CS2</a>
+    <a href="{% url 'list_game_ids' %}" class="button">Ver IDs de Jogos Salvos</a>
+    <a href="{% url 'search_game_ids' %}" class="button">Buscar IDs de Jogos</a>
     <a href="{% url 'settings' %}" class="button">Configurações</a>
 
     {% if user.is_superuser %}
         <a href="{% url 'register' %}" class="button">Cadastrar Novo Usuário</a>
     {% endif %}
+{% endblock %}
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\list_clips.html
+Content:
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Profit Portal - Listar clipes</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'styles.css' %}">
+</head>
+<body>
+    <header>
+        <img src="{% static 'images/logo.png' %}" alt="Logo" class="logo">
+        <h1>Profit Portal - Listar clipes</h1>
+    </header>
+    <main class="container">
+        <div class="card">
+            <ul>
+                {% for clip in clips %}
+                <li>
+                    <label for="clip_{{ clip.id }}"><strong>{{ clip.title }}</strong> - {{ clip.duration }}s - {{ clip.view_count }} views</label>
+                    <div>
+                        <a href="{{ clip.url }}" target="_blank" class="button">Visualizar no Twitch</a>
+                        <a href="{% url 'download_clip' clip.id %}" class="button">Baixar Clip</a>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            <a href="{% url 'select_clips' %}" class="button">Voltar para Capturar Clipes</a>
+        </div>
+    </main>
+    {% if messages %}
+    <footer>
+        <ul>
+            {% for message in messages %}
+            <li>{{ message }}</li>
+            {% endfor %}
+        </ul>
+    </footer>
+    {% endif %}
+</body>
+</html>
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\list_game_ids.html
+Content:
+{% extends 'news/base.html' %}
+
+{% block title %}IDs de Jogos Salvos{% endblock %}
+
+{% block content %}
+    <h2>IDs de Jogos Salvos</h2>
+    <ul>
+        {% for game in game_ids %}
+        <li>ID: {{ game.game_id }}, Nome: {{ game.game_name }}</li>
+        {% endfor %}
+    </ul>
+    <a href="{% url 'index' %}" class="button">Voltar para Home</a>
 {% endblock %}
 --------------------------------------------------------------------------------
 
@@ -662,6 +936,82 @@ Content:
 {% endblock %}
 --------------------------------------------------------------------------------
 
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\search_game_ids.html
+Content:
+{% extends 'news/base.html' %}
+
+{% block title %}Buscar IDs de Jogos{% endblock %}
+
+{% block content %}
+    <h2>Buscar IDs de Jogos</h2>
+    <form method="POST" action="{% url 'search_game_ids' %}">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="game_name">Nome do Jogo:</label>
+            <input type="text" name="game_name" id="game_name" class="form-control" required>
+        </div>
+        <button type="submit" class="button">Buscar</button>
+    </form>
+
+    {% if searched %}
+        <h3>Resultados da Busca</h3>
+        <ul>
+            {% for game in games %}
+            <li>ID: {{ game.id }}, Nome: {{ game.name }}</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+
+    <a href="{% url 'index' %}" class="button">Voltar para Home</a>
+{% endblock %}
+
+--------------------------------------------------------------------------------
+
+Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\select_clips.html
+Content:
+{% extends 'news/base.html' %}
+
+{% block title %}Seleção de Clipes{% endblock %}
+
+{% block content %}
+    <h2>Buscar Clipes de CS2</h2>
+
+    <form method="POST" action="{% url 'fetch_clips' %}">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="game_id">ID do Jogo:</label>
+            <input type="text" name="game_id" id="game_id" class="form-control" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="period">Período:</label>
+            <select name="period" id="period" class="form-control" required>
+                <option value="day">Dia</option>
+                <option value="week">Semana</option>
+                <option value="month">Mês</option>
+                <option value="year">Ano</option>
+                <option value="all">Todos</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="min_duration">Duração Mínima:</label>
+            <input type="number" name="min_duration" id="min_duration" class="form-control" value="40">
+        </div>
+        
+        <div class="form-group">
+            <label for="max_duration">Duração Máxima:</label>
+            <input type="number" name="max_duration" id="max_duration" class="form-control" value="90">
+        </div>
+        
+        <button type="submit" class="button">Buscar Clipes</button>
+    </form>
+
+    <a href="{% url 'index' %}" class="button">Voltar para Home</a>
+{% endblock %}
+
+--------------------------------------------------------------------------------
+
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\news\templates\news\settings.html
 Content:
 {% extends 'news/base.html' %}
@@ -674,11 +1024,12 @@ Content:
     <form method="post" action="{% url 'settings' %}">
         {% csrf_token %}
         {{ form.as_p }}
-        <button type="submit">Salvar Configurações</button>
+        <button type="submit" class="button">Salvar Configurações</button>
     </form>
 
     <a href="{% url 'index' %}" class="button">Voltar para Home</a>
 {% endblock %}
+
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\ProfitPortal\asgi.py
@@ -1289,6 +1640,7 @@ def generate_script(article: str) -> str:
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\twitch_clips.py
 Content:
 import aiohttp
+import aiofiles
 import logging
 import os
 from datetime import datetime, timedelta
@@ -1321,7 +1673,7 @@ async def search_games(client_id, client_secret, game_name):
             data = await response.json()
             return data['data']
 
-async def fetch_cs2_clips(client_id, client_secret, game_id, period='week', num_clips=10, min_duration=40, max_duration=90):
+async def fetch_cs2_clips(client_id, client_secret, game_id, period='week', num_clips=10, min_duration=40, max_duration=90, started_at=None):
     """Busca os clipes mais populares de um jogo na Twitch."""
     auth_url = 'https://id.twitch.tv/oauth2/token'
     auth_params = {
@@ -1342,23 +1694,146 @@ async def fetch_cs2_clips(client_id, client_secret, game_id, period='week', num_
     params = {
         'game_id': game_id,
         'first': num_clips,
-        'started_at': (datetime.utcnow() - timedelta(days=7)).isoformat() + 'Z' if period == 'week' else None
+        'started_at': started_at
     }
+
+    logging.info(f"Fetching clips with params: {params}")
 
     async with aiohttp.ClientSession() as session:
         async with session.get(clips_url, headers=headers, params=params) as response:
             data = await response.json()
+            logging.info(f"Response from Twitch API: {data}")
             clips = []
-            for clip in data['data']:
-                duration = clip.get('duration')
+            for clip in data.get('data', []):
+                duration = float(clip.get('duration'))
                 if min_duration <= duration <= max_duration:
                     clips.append({
+                        'id': clip['id'],
                         'title': clip['title'],
                         'url': clip['url'],
-                        'duration': duration
+                        'thumbnail_url': clip['thumbnail_url'],
+                        'duration': duration,
+                        'view_count': clip['view_count'],
+                        'download_url': clip['url']  # URL para download do clipe
                     })
             return clips
 
+async def fetch_clip_download_url(clip_id, client_id, client_secret):
+    """Obtém a URL de download de um clipe da Twitch."""
+    auth_url = 'https://id.twitch.tv/oauth2/token'
+    auth_params = {
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'grant_type': 'client_credentials'
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(auth_url, params=auth_params) as response:
+            auth_data = await response.json()
+            access_token = auth_data['access_token']
+
+    clip_url = f'https://api.twitch.tv/helix/clips?id={clip_id}'
+    headers = {
+        'Client-ID': client_id,
+        'Authorization': f'Bearer {access_token}'
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.get(clip_url, headers=headers) as response:
+            data = await response.json()
+            clip_data = data.get('data', [])
+            if clip_data:
+                return clip_data[0]['thumbnail_url'].split('-preview-')[0] + '.mp4'
+            else:
+                return None
+
+async def download_clip(clip_id, clip_title, client_id, client_secret):
+    """Baixa um clipe da Twitch usando o ID do clipe."""
+    download_url = await fetch_clip_download_url(clip_id, client_id, client_secret)
+    if not download_url:
+        logging.error("URL de download não encontrada.")
+        return
+
+    clips_dir = 'clips'
+    os.makedirs(clips_dir, exist_ok=True)
+    file_path = os.path.join(clips_dir, f"{clip_title}.mp4")
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(download_url) as response:
+            if response.status == 200:
+                async with aiofiles.open(file_path, "wb") as file:
+                    while True:
+                        chunk = await response.content.read(1024)
+                        if not chunk:
+                            break
+                        await file.write(chunk)
+                logging.info(f"Clip '{clip_title}' baixado com sucesso em '{file_path}'.")
+            else:
+                logging.error(f"Erro ao baixar o clipe: Status {response.status}")
+
+async def fetch_and_download_top_clip(client_id, client_secret, game_id, period='week', min_duration=40, max_duration=90):
+    """Busca e baixa o clipe mais famoso."""
+    # Primeiro, buscar o clipe mais famoso independentemente da duração
+    auth_url = 'https://id.twitch.tv/oauth2/token'
+    auth_params = {
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'grant_type': 'client_credentials'
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(auth_url, params=auth_params) as response:
+            auth_data = await response.json()
+            access_token = auth_data['access_token']
+    
+    clips_url = 'https://api.twitch.tv/helix/clips'
+    headers = {
+        'Client-ID': client_id,
+        'Authorization': f'Bearer {access_token}'
+    }
+    params = {
+        'game_id': game_id,
+        'first': 1,
+        'started_at': (datetime.utcnow() - timedelta(days=7)).isoformat() + 'Z' if period == 'week' else None
+    }
+
+    logging.info(f"Fetching top clip with params: {params}")
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(clips_url, headers=headers, params=params) as response:
+            data = await response.json()
+            logging.info(f"Response from Twitch API: {data}")
+            clips = data.get('data', [])
+            if clips:
+                top_clip = clips[0]
+                await download_clip(top_clip['id'], top_clip['title'], client_id, client_secret)
+                logging.info(f"Top clip '{top_clip['title']}' com duração de {top_clip['duration']} segundos baixado.")
+            else:
+                logging.info("Nenhum clipe encontrado com os critérios especificados.")
+
+async def download_clip_async(clip_id, clip_title, client_id, client_secret):
+    """Baixa um clipe da Twitch usando o ID do clipe."""
+    download_url = await fetch_clip_download_url(clip_id, client_id, client_secret)
+    if not download_url:
+        logging.error("URL de download não encontrada.")
+        return None
+
+    clips_dir = 'clips'
+    os.makedirs(clips_dir, exist_ok=True)
+    file_path = os.path.join(clips_dir, f"{clip_title}.mp4")
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(download_url) as response:
+            if response.status == 200:
+                async with aiofiles.open(file_path, "wb") as file:
+                    while True:
+                        chunk = await response.content.read(1024)
+                        if not chunk:
+                            break
+                        await file.write(chunk)
+                logging.info(f"Clip '{clip_title}' baixado com sucesso em '{file_path}'.")
+                return file_path
+            else:
+                logging.error(f"Erro ao baixar o clipe: Status {response.status}")
+                return None
+            
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\scripts\upload_to_notion.py
@@ -1794,6 +2269,7 @@ color: #ddd0;
 main {
 padding-top: 80px; /* Ajuste este valor de acordo com a altura do seu cabeçalho */
 }
+
 --------------------------------------------------------------------------------
 
 Filename: c:\Users\Marcos\dev\moneyprinter-v2\tests\test_config.py

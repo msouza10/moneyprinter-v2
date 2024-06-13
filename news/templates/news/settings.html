@@ -8,7 +8,7 @@
     <form method="post" action="{% url 'settings' %}">
         {% csrf_token %}
         {{ form.as_p }}
-        <button type="submit">Salvar Configurações</button>
+        <button type="submit" class="button">Salvar Configurações</button>
     </form>
 
     <a href="{% url 'index' %}" class="button">Voltar para Home</a>

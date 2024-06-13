@@ -1,0 +1,13 @@
+{% extends 'news/base.html' %}
+
+{% block title %}IDs de Jogos Salvos{% endblock %}
+
+{% block content %}
+    <h2>IDs de Jogos Salvos</h2>
+    <ul>
+        {% for game in game_ids %}
+        <li>ID: {{ game.game_id }}, Nome: {{ game.game_name }}</li>
+        {% endfor %}
+    </ul>
+    <a href="{% url 'index' %}" class="button">Voltar para Home</a>
+{% endblock %}

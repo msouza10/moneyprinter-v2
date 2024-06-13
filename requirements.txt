@@ -6,3 +6,4 @@ python-dotenv
 google-generativeai
 gunicorn
 django
+aiofiles

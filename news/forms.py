@@ -6,11 +6,13 @@ from django.contrib.auth.models import User
 class APISettingsForm(forms.ModelForm):
     class Meta:
         model = APISettings
-        fields = ['notion_token', 'notion_database_id', 'gemini_api_key']
+        fields = ['notion_token', 'notion_database_id', 'gemini_api_key', 'twitch_client_id', 'twitch_client_secret']
         widgets = {
             'notion_token': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
             'notion_database_id': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
             'gemini_api_key': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
+            'twitch_client_id': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
+            'twitch_client_secret': forms.TextInput(attrs={'class': 'form-control custom-textbox'}),
         }
 
 class CustomAuthenticationForm(AuthenticationForm):
@@ -26,4 +28,3 @@ class RegisterForm(UserCreationForm):
             'password1': forms.PasswordInput(attrs={'class': 'form-control'}),
             'password2': forms.PasswordInput(attrs={'class': 'form-control'}),
         }
-    

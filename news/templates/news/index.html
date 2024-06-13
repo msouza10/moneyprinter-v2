@@ -11,6 +11,9 @@
         <button type="submit">Capturar Notícias</button>
     </form>
 
+    <a href="{% url 'select_clips' %}" class="button">Buscar Clipes de CS2</a>
+    <a href="{% url 'list_game_ids' %}" class="button">Ver IDs de Jogos Salvos</a>
+    <a href="{% url 'search_game_ids' %}" class="button">Buscar IDs de Jogos</a>
     <a href="{% url 'settings' %}" class="button">Configurações</a>
 
     {% if user.is_superuser %}

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Profit Portal - Listar clipes</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'styles.css' %}">
+</head>
+<body>
+    <header>
+        <img src="{% static 'images/logo.png' %}" alt="Logo" class="logo">
+        <h1>Profit Portal - Listar clipes</h1>
+    </header>
+    <main class="container">
+        <div class="card">
+            <ul>
+                {% for clip in clips %}
+                <li>
+                    <label for="clip_{{ clip.id }}"><strong>{{ clip.title }}</strong> - {{ clip.duration }}s - {{ clip.view_count }} views</label>
+                    <div>
+                        <a href="{{ clip.url }}" target="_blank" class="button">Visualizar no Twitch</a>
+                        <a href="{% url 'download_clip' clip.id %}" class="button">Baixar Clip</a>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            <a href="{% url 'select_clips' %}" class="button">Voltar para Capturar Clipes</a>
+        </div>
+    </main>
+    {% if messages %}
+    <footer>
+        <ul>
+            {% for message in messages %}
+            <li>{{ message }}</li>
+            {% endfor %}
+        </ul>
+    </footer>
+    {% endif %}
+</body>
+</html>
